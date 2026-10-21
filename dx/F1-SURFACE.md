@@ -101,7 +101,7 @@ its own project keeps it.
 
 | Field | Meaning |
 | --- | --- |
-| `audit` | What the server checked this answer against. Never a claim the server cannot back. |
+| `audit` | What the server checked this answer against. Never a claim the server cannot back - and "the graph is the only source consulted" is said only where the graph WAS consulted, which is not the certificate, not the commit gate, and not the escape. |
 | `shape` | What the answer carried and what it cost: `source` (the policy in force), `tokens` (the estimate), `budget`, `over_budget`, `excess`, `bodies_included`. |
 | `next` | `answer` (you have enough), `inspect` (one more named request), or `escape`. |
 
@@ -214,12 +214,17 @@ both a DX session and a plain session.
 | 27 | A request missing the field its type needs | rejected, message names the field |
 | 28 | A request with no `project` | the session's project is filled in |
 | 29 | The base refused or failed | `next` is `inspect`; `isError` is set; the DX refusal sets it too |
-| 25 | The shape | reports the source policy, the tokens, the budget, the excess and the bodies |
-| 26 | Source bodies counted | one for a result carrying `source`, zero without |
-| 27 | The schema advertises the policy | the `source` enum, its default and `max_tokens` bounds are all present |
-| 28 | The schema and the table agree | the `type` enum equals the dispatch table, both in `request` and in `draft` |
-| 29 | The schema requires the envelope | all four fields are in `required` |
-
+| 30 | The shape | reports the source policy, the tokens, the budget, the excess and the bodies |
+| 31 | Source bodies counted | one for a result carrying `source`, zero without; a placeholder is not a body |
+| 32 | The schema advertises the policy | the `source` enum, its default and `max_tokens` bounds are |
+| 33 | The schema and the table agree | the `type` enum equals the dispatch table, both in `request`
+| 34 | The schema requires the envelope | all four fields are in `required` |
+| 35 | A required field of only whitespace | rejected - a length check is not enough, and the schema says `pattern` |
+| 36 | An unknown envelope or `draft` field | rejected and named; the schema says `additionalProperties: false` |
+| 37 | A malformed `source` | rejected and named - never silently dropped, which would be a silent downgrade |
+| 38 | A fractional `max_tokens` | rejected - the budget is an integer, and a truncation is a budget nobody asked for |
+| 39 | A failure, not an answer | the budget does **not** refuse it; the failure passes through with its own message |
+| 40 | The audit says what was consulted | the graph for the graph-answering types, the caller for the certificate and the gate, and nothing at all for the escape |
 **The module is compiled and run standalone.** It depends on `yyjson` and the C
 standard library only - no store, no tree-sitter, no SQLite - so the contract
 is verifiable without the full build:
