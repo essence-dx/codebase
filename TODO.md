@@ -56,15 +56,38 @@ published no release, so there is no asset to install.
 **Done when.** The first release of this fork exists, and the registry carries
 
 ```rust
-("codebase", "essence-dx/codebase", "codebase", "bin/codebase"),
+("codebase", "essence-dx/codebase", "dx-codebase", "bin/dx-codebase"),
 ```
 
-with `codebase` in the binary name - not `dx-codebase`. The organisation is
-already `essence-dx`, so a second `dx` prefix in the slug is redundant. **This
-also changes the release-asset convention** the other 20 tools follow
-(`dx-<tool>-<target-triple>[.exe]`, proven by `essence-dx/media` v1.0.0). That
-convention is a hub-level install contract, so this is a decision for the hub,
-not for this repository - see `CB-11`.
+**The binary name is `dx-codebase`, and the earlier draft of this item said
+`codebase` - which was wrong.** The reasoning behind that draft was that "the
+organisation is already `essence-dx`, so a second `dx` prefix in the slug is
+redundant". That is true of the *repository slug* and false of the *installed
+binary*, and the install contract is the registry, not the slug. The hub's
+`TOOL_REGISTRY` in `cli/src/update_registry.rs` is unambiguous - every DX tool
+carries the prefix:
+
+```rust
+("check",  "essence-dx/check",  "dx-check",  "bin/dx-check"),
+("dcp",    "essence-dx/dcp",    "dx-dcp",    "bin/dx-dcp"),
+("forge",  "essence-dx/forge",  "dx-forge",  "bin/dx-forge"),
+("media",  "essence-dx/media",  "dx-media",  "bin/dx-media"),
+("style",  "essence-dx/style",  "dx-style",  "bin/dx-style"),
+```
+
+Fourteen tools, one convention, no exceptions: the installed binary is
+`dx-<tool>` and the path is `bin/dx-<tool>`. The release assets follow the same
+shape - `dx-<tool>-<target-triple>[.exe]`, proven by `essence-dx/media` v1.0.0
+and by every other release in the organisation.
+
+**So the `dx-` prefix is not a redundancy to be removed; it is the contract
+that makes every DX tool installable by the same mechanism.** A `codebase`
+binary would have been a product the hub could not install.
+
+**It also makes the release assets correct for free.** The archive names in the
+build workflow are derived from the binary's name, so building the release
+binary as `dx-codebase` produces `dx-codebase-windows-amd64.zip` and the rest,
+with no change to the packaging.
 
 **BLOCKED** on the first release (`CB-02`).
 
@@ -419,14 +442,32 @@ upstream line numbers against a named commit rather than against "the README".
 
 ### CB-15 - Get the hub's release-asset naming decision
 
-**Evidence.** Every other DX tool publishes `dx-<tool>-<target-triple>[.exe]`
-(`essence-dx/media` v1.0.0 is the proof in `DX.md:38`). This fork's tool is
-named `codebase`, not `dx-codebase`, because the organisation is already
-`essence-dx`. That breaks the pattern the hub's own installer depends on. The
-live check on 2026-10-21 found all 14 registry entries using `dx-<tool>`.
+**Status 2026-10-21 - ANSWERED, and the answer is `dx-codebase`.** The hub
+already states the convention, in the place that implements it: the
+`TOOL_REGISTRY` in `cli/src/update_registry.rs` carries `dx-<tool>` for every
+one of the fourteen tools that have an entry, with the path `bin/dx-<tool>`:
 
-**Done when.** The hub states in writing whether `codebase` is the exception, or
-the tool is renamed.
+```rust
+("check", "essence-dx/check", "dx-check", "bin/dx-check"),
+("forge", "essence-dx/forge", "dx-forge", "bin/dx-forge"),
+("media", "essence-dx/media", "dx-media", "bin/dx-media"),
+```
+
+`G:\Dx\AGENTS.md` says the same thing in prose: *"Release-asset naming:
+`dx-<tool>-<target-triple>[.exe]` over 6 targets"* and *"Install layout on
+Windows: `%LOCALAPPDATA%\dx\bin`, one `dx-<tool>` file per tool"*.
+
+**So this is not a decision the hub still has to make - it is a contract the
+hub already publishes, and this fork's ledger had it wrong.** `CB-01` carried
+the same wrong answer and is corrected with it. The earlier reasoning - that
+"the organisation is already `essence-dx`, so a second `dx` prefix in the
+slug is redundant" - is about the repository slug, and the slug is
+`essence-dx/codebase`; the *binary* is `dx-codebase`, and that is what the
+registry and the installer use.
+
+**Done when.** The release publishes `dx-codebase-<target-triple>[.exe]` and
+the registry carries `("codebase", "essence-dx/codebase", "dx-codebase",
+"bin/dx-codebase")`.
 
 ### CB-16 - Decide what happens to CBM Lens in a DX product
 
@@ -640,6 +681,41 @@ twenty-minute rebuild and one run.
 **Done when.** The base commit's failure set is measured on this toolchain, the
 two sets are diffed, and every remaining failure is either attributed or
 fixed.
+
+### CB-23 - Rename the release pipeline from `codebase-memory-mcp` to `dx-codebase`
+
+**Evidence.** `CB-15` established the hub's contract: the installed binary is
+`dx-<tool>` and the release asset is `dx-<tool>-<target-triple>[.exe]`. This
+fork's release pipeline still produces `codebase-memory-mcp` everywhere, so
+the first release would be a product the hub cannot install.
+
+**The scope, mapped.** The name is not one string in one file. It is **200+
+occurrences across about twenty files**, in five distinct roles, and each role
+needs a different answer:
+
+| Role | Where | The answer |
+| --- | --- | --- |
+| The binary inside the archive | `scripts/ci/prepare-release-candidates.sh:141-142` (`BINARY_NAME`), `scripts/package-release.sh:192,196` (`STAGED_BINARY_NAME`) | `dx-codebase` / `dx-codebase.exe` |
+| The archive name | `scripts/package-release.sh:132` and `scripts/ci/smoke-artifact.sh:132` (`NAME=`), and the archive lists in `scripts/ci/extract-release-archives.sh:86-88` and `scripts/ci/verify-release-selection.py:73,78` | `dx-codebase-<target>.<ext>` - these are **paired**; the packaging renames and the extraction does not, and a half-renamed pipeline breaks the release |
+| The release selection | `scripts/ci/select-release-candidates.py:174`, `stage-release-candidates.py:166`, `verify-release-selection.py:71,170`, `.github/workflows/_build.yml:398-399` | `dx-codebase` |
+| The MCP client config key | `scripts/setup.sh`, `scripts/setup-windows.ps1`, and every `mcp__codebase-memory-mcp__*` assertion in `scripts/smoke-test.sh` | **a separate decision** - this is the name the agent sees and the namespace the tools live in, and under the DX profile the one tool is `dx_codebase` |
+| The package registries | `scripts/package-release.sh:293` (the `.mcpb` manifest), `release.yml:513-533` (npm), the brew tap in `_smoke.yml:367-370`, the Go module path at `release.yml:297` | **a fork must not publish under upstream's names.** `codebase-memory-mcp` on npm and the `deusdata/codebase-memory-mcp` brew tap belong to upstream. The fork either claims `dx-codebase` or does not publish there |
+
+**What was tried and why it was reverted.** A mechanical rename of the
+packaging, selection, extraction and smoke sites was applied and then
+reverted. The reason is worth recording: the rename reached the *packaging*
+side of each pair and not the *extraction* side, because the two live in
+different files, and **a pipeline whose halves disagree is worse than an
+untouched one** - it fails at the step that has no obvious cause. The
+alternative - renaming everything, including the npm and brew publication and
+the MCP config key - is a product-identity decision, not a mechanical one, and
+it is listed above role by role so it can be made deliberately.
+
+**Done when.** The release publishes `dx-codebase-<target-triple>[.exe]`, the
+archives contain `dx-codebase`, the selection and extraction agree, the
+registry carries `("codebase", "essence-dx/codebase", "dx-codebase",
+"bin/dx-codebase")`, and **nothing in the pipeline publishes under upstream's
+package names**.
 
 ---
 
