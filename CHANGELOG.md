@@ -214,9 +214,9 @@ now run where the other 191 suites run, and they pass:
   ...
   dx_recall_rejects_a_non_array                          PASS
 
-────────────────────────────────────────────
+--------------------------------------------
   89 passed
-────────────────────────────────────────────
+--------------------------------------------
 ```
 
 The standalone driver was a convenience, not evidence. A suite that passes
