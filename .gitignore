@@ -60,6 +60,12 @@ BENCHMARK_REPORT.md
 TEST_PLAN.md
 CHANGELOG.md
 
+# DX: this fork keeps its own change ledger in CHANGELOG.md. Upstream ignores
+# that path because it publishes release notes on GitHub instead. Without this
+# negation a `git add -A` silently drops the ledger entry that AGENTS.md
+# section 5 requires in the same commit as the code change.
+!CHANGELOG.md
+
 # Soak test output
 soak-results/
 
