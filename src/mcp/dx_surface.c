@@ -729,6 +729,20 @@ const char *dx_surface_escape_text(void) {
 /* ------------------------------------------------------------------- audit */
 
 char *dx_surface_audit_text(const dx_surface_request_t *req, const char *checked) {
+  /* The escape answer is not a graph answer, and the audit must not claim
+   * it is. The generic wording says "the graph is the only source
+   * consulted" - which for an escape is FALSE: no graph was consulted at
+   * all, because the question was not about the code. An audit line that
+   * certifies something the server cannot back is the one thing this
+   * surface must never emit, and the escape answer was emitting one.
+   *
+   * The other half of it was not English: "Answered from no graph query
+   * was needed" is a sentence that does not parse. */
+  if (req->request_type == DX_REQ_ESCAPE) {
+    return dx_msg("No graph query was needed: the committed request type was 'escape', so the "
+                  "graph was not consulted at all. The answer is the bail-out text, and it is "
+                  "not a fact about the code.");
+  }
     if (!req) {
         return NULL;
     }

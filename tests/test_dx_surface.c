@@ -1178,6 +1178,43 @@ TEST(dx_the_four_envelope_fields_are_still_accepted) {
     PASS();
 }
 
+TEST(dx_the_escape_audit_does_not_claim_the_graph_was_consulted) {
+    /* The escape answer is not a graph answer. The generic audit wording says
+     * "is the only source consulted" - which for an escape is
+     * FALSE: no graph was consulted at all. An audit line that certifies
+     * something the server cannot back is the one thing this surface must
+     * never emit, and the escape answer was emitting one. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"what is the weather\",\"draft\":{\"reason\":\"not a code question\","
+        "\"type\":\"escape\"},\"review\":\"v\",\"request\":{\"type\":\"escape\"}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), 0);
+    ASSERT_EQ(req.request_type, DX_REQ_ESCAPE);
+
+    char *audit = dx_surface_audit_text(&req, "no graph query was needed");
+    ASSERT_NOT_NULL(audit);
+    ASSERT_TRUE(strstr(audit, "is the only source consulted") == NULL);
+    ASSERT_TRUE(strstr(audit, "not consulted at all") != NULL);
+    free(audit);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_the_graph_audit_still_claims_the_graph_was_consulted) {
+    /* And the other half must not be lost: a real graph answer DOES say the
+     * graph was the only source consulted. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    ASSERT_EQ(dx_surface_parse(DX_VALID, &req, &err), 0);
+    char *audit = dx_surface_audit_text(&req, "the indexed graph");
+    ASSERT_NOT_NULL(audit);
+    ASSERT_TRUE(strstr(audit, "is the only source consulted") != NULL);
+    free(audit);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
 TEST(dx_the_schema_documents_the_answer_policy) {
     const char *schema = dx_surface_tool_schema();
     yyjson_doc *doc = yyjson_read(schema, strlen(schema), 0);
@@ -1265,5 +1302,7 @@ SUITE(dx_surface) {
     RUN_TEST(dx_a_typo_in_a_field_name_is_refused_rather_than_ignored);
     RUN_TEST(dx_an_unknown_draft_field_is_refused_not_ignored);
     RUN_TEST(dx_the_four_envelope_fields_are_still_accepted);
+    RUN_TEST(dx_the_escape_audit_does_not_claim_the_graph_was_consulted);
+    RUN_TEST(dx_the_graph_audit_still_claims_the_graph_was_consulted);
     RUN_TEST(dx_the_schema_documents_the_answer_policy);
 }
