@@ -37,7 +37,7 @@ Name: `dx_codebase`
 | `schema` | the graph schema | `get_graph_schema` |
 | `coverage` | is this scope indexed and fresh | `check_index_coverage` |
 | `changes` | what a diff reaches | `detect_changes` |
-| `escape` | not a graph question | none - returns a clean bail-out |
+| `escape` | not a graph question - hand it back to your own tools | none - returns a clean bail-out |
 | `verify` | does the graph back this claim | none - answered by the DX layer |
 | `certificate` | did this change open a new path into a declared boundary | none - answered by the DX layer |
 | `enforce` | the commit gate | none - answered by the DX layer |

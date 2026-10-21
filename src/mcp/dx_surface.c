@@ -64,7 +64,7 @@ static const dx_type_def_t DX_TYPES[DX_REQ_TYPE_COUNT] = {
     {"schema", "get_graph_schema", "", "the graph schema"},
     {"coverage", "check_index_coverage", "", "is this scope indexed and fresh"},
     {"changes", "detect_changes", "", "what a diff reaches"},
-    {"escape", NULL, NULL, "not a graph question"},
+    {"escape", NULL, NULL, "not a graph question - hand it back to your own tools"},
     {"verify", NULL, NULL, "does the graph back this claim"},
     {"certificate", NULL, NULL, "did this change open a new path into a declared boundary"},
     {"enforce", NULL, NULL, "the commit gate"},
