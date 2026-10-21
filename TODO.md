@@ -426,6 +426,80 @@ the embedding-only ranking on the same queries, with the command and the
 machine named - **and** a query set on which it does not, so the default stays
 honest.
 
+### CB-19 - The DX-native org graph layer
+
+**Evidence.** The code graph knows the code. It does not know that `dx-check` is
+built from `essence-dx/check`, that the manifest routes `check` to the folder
+`check`, or that `bot` path-depends on `metasearch` and breaks when the second
+moves. Those are organisational facts, they live in the hub, and until they are
+in the graph the tool cannot answer the question the hub actually asks: which
+repository owns this, which rule governs it, and what else breaks if it changes.
+CBM's cross-repo mode links *services*; it has no model of a DX tool, a DX rule
+or a DX register row.
+
+**What to build.** A module that turns three inputs into DX-native nodes and
+edges - the `dx` workspace manifest (its `paths(...)` block), the published tool
+registry, and the declared path dependencies - with a node vocabulary of
+`DXRoute`, `DXTool`, `DXFolder`, `DXRepo` and `DXPathDependency`. It reads no
+files and calls no graph, so it is verifiable without a workspace, on the same
+pattern as `dx_surface.c` and `dx_governance.c`.
+
+**Status 2026-10-21.** Designed and prototyped, then **reverted rather than
+shipped**: the prototype's output carried corrupted string values and the cause
+was not found in the time available. Unverified code does not go in. The
+design above and the two defects found are the record:
+
+- **A size calculation was wrong.** The dependency id is
+  `"dx:dep:" + from + "->" + to`, and the buffer was allocated
+  `strlen(from) + strlen(to) + 8` when it needed `+ 10`, so the id was
+  silently truncated to `dx:dep:bot->metasear`.
+- **The same node id was emitted twice.** A folder that is both a route target
+  and a dependency source produced two nodes with one id, and a graph with the
+  same id twice is not a graph. The fix was a seen-set, so the duplicate
+  cannot come back.
+
+**Done when.** One query answers "which repository owns this symbol, which rule
+governs it, and what else breaks if it changes", and the answer names the
+repositories **consulted and skipped**.
+
+### CB-20 - The Windows build story: MSVC, not MinGW
+
+**Evidence.** A full build of the tree on this machine **fails**, and not for a
+reason DX introduced. `src/foundation/arena.h:82` declares
+`cbm_arena_sprintf` with `__attribute__((format(printf, 2, 3)))`. On MinGW that
+attribute resolves to `ms_printf` semantics, which **do not support `%zu`**, so
+every call site using `%zu` fails to compile:
+
+```
+src/pipeline/helm_template.c:2202:72: error: unknown conversion type character 'z' in format
+internal/cbm/doc_pdf.c:1337:70: error: unknown conversion type character 'z' in format
+src/pipeline/pass_k8s.c:4672:58: error: too many arguments for format
+```
+
+Everything up to the link stage compiles cleanly - all 162 grammars, the
+tree-sitter runtime, SQLite, mimalloc, xxhash and yyjson - and the failure is
+confined to the format attribute under MinGW.
+
+**What to build.** A decision, and it is a product decision rather than a code
+one:
+
+1. **Build on MSVC.** The upstream project ships a native Windows binary and
+   has a `scripts/test-windows.ps1` that drives `make -f Makefile.cbm` - but
+   its Windows releases are MSVC builds. This box has MinGW and no MSVC
+   (`vswhere` is absent), so the sanctioned Windows test path cannot run here.
+2. **Or make the attribute portable** - a small upstream change that guards the
+   `format(printf, ...)` attribute so `%zu` is accepted under MinGW, and the
+   tree builds with the toolchain that is actually present.
+
+**Why it matters.** Until one of these is true, **the full server build cannot
+be run in this environment**, and every DX change is compile-verified and
+unit-tested but not built. That is a real limit on the confidence in the DX
+layer, and it is recorded here rather than glossed over.
+
+**Done when.** `make -f Makefile.cbm cbm` completes on this machine, or
+`scripts/test-windows.ps1` runs the Windows guard suite, and the DX suites
+run inside the house test binary rather than standalone.
+
 ---
 
 MIT OR Apache-2.0

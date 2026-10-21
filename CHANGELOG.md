@@ -19,6 +19,56 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `docs:` the Windows build story, and one reverted prototype
+
+**Two findings, one of which changes what the DX layer can claim.**
+
+**The full build fails on this machine, and the reason is upstream.** The whole
+tree compiles - all 162 vendored grammars, the tree-sitter runtime, SQLite,
+mimalloc, xxhash, yyjson - and reaches the link stage. It then fails to compile
+three call sites:
+
+```
+src/pipeline/helm_template.c:2202:72: error: unknown conversion type character 'z' in format
+internal/cbm/doc_pdf.c:1337:70: error: unknown conversion type character 'z' in format
+src/pipeline/pass_k8s.c:4672:58: error: too many arguments for format
+```
+
+`src/foundation/arena.h:82` declares `cbm_arena_sprintf` with
+`__attribute__((format(printf, 2, 3)))`. On **MinGW** that attribute resolves to
+`ms_printf` semantics, which do not support `%zu`. Upstream's Windows binary is
+an **MSVC** build - this box has MinGW and no MSVC (`vswhere` is absent), so the
+project's own sanctioned Windows path (`scripts/test-windows.ps1`) cannot run
+here.
+
+**What this means for the DX layer, stated plainly.** Every DX module is
+compile-verified with the project's own flags and unit-tested standalone, but
+**the full server build has never been run in this environment**, and the DX
+suites have never run inside the house test binary. `CB-20` records the two
+ways out - build on MSVC, or make the format attribute portable so the tree
+builds with the toolchain that is actually present.
+
+**One prototype reverted rather than shipped.** The DX-native org graph layer
+(`CB-19`) was designed, written and prototyped. Its output carried corrupted
+string values, the cause was not found in the time available, and **unverified
+code does not go in** - so it was reverted, and the design and the two defects
+found are recorded instead:
+
+- a size calculation was wrong (`+8` where the id needed `+10`), so a
+  dependency id was silently truncated to `dx:dep:bot->metasear`;
+- a folder that was both a route target and a dependency source produced two
+  nodes with one id, and a graph with the same id twice is not a graph.
+
+**Executed.**
+
+| Check | Result |
+| --- | --- |
+| `dx_surface.c` compiles clean; its contract tests pass | exit 0, **34 passed** |
+| `dx_governance.c` compiles clean; its contract tests pass | exit 0, **23 passed** |
+| `dx_memory.c` compiles clean; its contract tests pass | exit 0, **12 passed** |
+| `mcp.c`, `dx_surface.c`, `dx_governance.c`, `dx_memory.c` and all three test files pass `-fsyntax-only` with the project include set | exit 0 |
+| The full server build | **FAILS** - the MinGW `ms_printf` attribute rejects `%zu` (`CB-20`) |
+
 ### 2026-10-21 - `feat:` anchored memory - a memory that says when it went stale
 
 **Milestone M5, policy half.** The base stores decisions, but nothing it stores
