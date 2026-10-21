@@ -1310,8 +1310,8 @@ TEST(dx_the_audit_says_the_graph_was_not_consulted_for_the_certificate) {
 
     char *audit = dx_surface_audit_text(&req, "the indexed graph");
     ASSERT_NOT_NULL(audit);
-    ASSERT_NULL(strstr(audit, "the graph is the only source consulted"));
-    ASSERT_TRUE(strstr(audit, "the caller's paths and boundaries") != NULL);
+    ASSERT_NULL(strstr(audit, "The graph is the only source consulted"));
+    ASSERT_TRUE(strstr(audit, "The caller's paths and boundaries") != NULL);
     free(audit);
     dx_surface_request_free(&req);
     PASS();
@@ -1330,8 +1330,8 @@ TEST(dx_the_audit_says_the_graph_was_not_consulted_for_the_gate) {
 
     char *audit = dx_surface_audit_text(&req, "the indexed graph");
     ASSERT_NOT_NULL(audit);
-    ASSERT_NULL(strstr(audit, "the graph is the only source consulted"));
-    ASSERT_TRUE(strstr(audit, "the caller's findings and baseline") != NULL);
+    ASSERT_NULL(strstr(audit, "The graph is the only source consulted"));
+    ASSERT_TRUE(strstr(audit, "The caller's findings and baseline") != NULL);
     free(audit);
     dx_surface_request_free(&req);
     PASS();
@@ -1348,7 +1348,7 @@ TEST(dx_the_audit_still_says_the_graph_was_consulted_for_a_graph_answer) {
     ASSERT_EQ(dx_surface_parse(args, &req, &err), 0);
     char *audit = dx_surface_audit_text(&req, "the indexed graph");
     ASSERT_NOT_NULL(audit);
-    ASSERT_TRUE(strstr(audit, "the graph is the only source consulted") != NULL);
+    ASSERT_TRUE(strstr(audit, "The graph is the only source consulted") != NULL);
     free(audit);
     dx_surface_request_free(&req);
     PASS();

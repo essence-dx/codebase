@@ -791,15 +791,15 @@ char *dx_surface_audit_text(const dx_surface_request_t *req, const char *checked
                       "not a fact about the code.");
     case DX_REQ_CERTIFICATE:
         source = "the paths and the boundaries the caller supplied";
-        consulted = "the caller's paths and boundaries are the only source consulted";
+        consulted = "The caller's paths and boundaries are the only source consulted";
         break;
     case DX_REQ_ENFORCE:
         source = "the findings and the baseline the caller supplied";
-        consulted = "the caller's findings and baseline are the only source consulted";
+        consulted = "The caller's findings and baseline are the only source consulted";
         break;
     default:
         source = checked && checked[0] ? checked : "the indexed graph";
-        consulted = "the graph is the only source consulted";
+        consulted = "The graph is the only source consulted";
         break;
     }
 
