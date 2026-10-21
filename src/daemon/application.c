@@ -2986,7 +2986,7 @@ static cbm_daemon_runtime_application_status_t application_set_context(
                         event_length + dialect_length;
     if (request[5] > 1 || root_length == 0 || expected != request_length ||
         (!allowed_present && allowed_length != 0) ||
-        profile_value > (uint8_t)CBM_MCP_TOOL_PROFILE_SCOUT ||
+        profile_value > (uint8_t)CBM_MCP_TOOL_PROFILE_LAST ||
         (profile_value != (uint8_t)CBM_MCP_TOOL_PROFILE_ALL &&
          (event_length != 0 || dialect_length != 0))) {
         return CBM_DAEMON_RUNTIME_APPLICATION_REJECTED;
@@ -3846,7 +3846,7 @@ cbm_daemon_runtime_application_status_t cbm_daemon_application_client_set_contex
     size_t dialect_length = hook_dialect ? strlen(hook_dialect) : 0;
     uint64_t total = (uint64_t)APPLICATION_CONTEXT_HEADER_SIZE + root_length + allowed_length +
                      event_length + dialect_length;
-    if (tool_profile < CBM_MCP_TOOL_PROFILE_ALL || tool_profile > CBM_MCP_TOOL_PROFILE_SCOUT ||
+    if (tool_profile < CBM_MCP_TOOL_PROFILE_ALL || tool_profile > CBM_MCP_TOOL_PROFILE_LAST ||
         (tool_profile != CBM_MCP_TOOL_PROFILE_ALL && (event_length != 0 || dialect_length != 0)) ||
         !cbm_hook_augment_invocation_supported(hook_event, hook_dialect) ||
         root_length > UINT32_MAX || allowed_length > UINT32_MAX || event_length > UINT32_MAX ||

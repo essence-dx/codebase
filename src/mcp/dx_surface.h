@@ -108,6 +108,27 @@ bool dx_surface_type_from_name(const char *name, dx_request_type_t *out);
  * governance requests, which the server handles itself. */
 const char *dx_surface_base_tool(dx_request_type_t type);
 
+/* The base tool's own required parameter list for a request type, space
+ * separated, or NULL for the types that dispatch to no base tool.
+ *
+ * These are the parameters the CALLER has to know - the ones that say which
+ * symbol is being asked about. "project" is not among them: every base tool
+ * requires one and the base has no implicit fallback, but the session knows
+ * which project it is on, so dx_surface_apply_session_project fills it in.
+ *
+ * The DX surface is the only schema the agent sees, so it carries the base
+ * tool's requirements itself. The house test checks this list against the
+ * base tools' own schemas, so the two cannot drift apart. */
+const char *dx_surface_type_required_fields(dx_request_type_t type);
+
+/* Fill the project into a parsed request's forwarded arguments when the
+ * request did not name one, taking it from the session.
+ *
+ * A request that names its own project keeps it: this only fills a gap.
+ * Returns 0 on success and -1 on failure, in which case the request is left
+ * exactly as it was. */
+int dx_surface_apply_session_project(dx_surface_request_t *req, const char *session_project);
+
 /* Is this one of the governance requests? They are answered by the DX layer
  * rather than by a base tool, and they are the only types whose answer is a
  * verdict about a claim rather than a fact about the code. */

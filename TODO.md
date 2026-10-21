@@ -500,6 +500,45 @@ internal/cbm/doc_pdf.c:1337:70: error: unknown conversion type character 'z' in 
 src/pipeline/pass_k8s.c:4672:58: error: too many arguments for format
 ```
 
+### CB-21 - The DX surface must be what you get by default, not a flag
+
+**Evidence.** The DX profile works, and it is the only way to reach every DX
+feature in this fork. It is also **opt-in**: `src/main.c` initialises the
+profile to `CBM_MCP_TOOL_PROFILE_ALL` and only `--tool-profile=dx` (or
+`--tool-profile dx`) selects the DX surface. So a user who installs this fork
+and runs it gets upstream's seventeen-tool menu, and the thing this fork was
+built to replace is the default.
+
+The measurement behind that decision is not in dispute: the upstream base
+measured **+66% tokens** for a session with MCP attached versus without it.
+The surface, not the graph, is where the tokens go. A product that ships the
+old surface by default has not solved the problem it was built to solve.
+
+**What to decide.** Three options, and this is a product decision rather than
+a code one:
+
+1. **Default the binary to the DX profile.** `--tool-profile=all` restores the
+   upstream menu for anyone who wants it. Cleanest for a product, and it
+   matches the name: a `dx-codebase` binary that behaves like
+   `codebase-memory-mcp` is confusing.
+2. **Default by binary name.** If `argv[0]` ends in `dx-codebase`, select the
+   DX profile; otherwise `all`. Two binaries, two behaviours, one build. It
+   also leans on `CB-01`, where the binary name is still open.
+3. **Default through the install contract.** The install command writes the
+   client configuration, so it could write `--tool-profile=dx` into the
+   generated client config. The flag stays the product's default without
+   changing the binary's behaviour for a hand-run invocation.
+
+**Why it is not done here.** The default profile changes the behaviour of
+every existing invocation of this binary, and the binary's name - and
+therefore whether option 1 or option 2 is even the right shape - is still
+open in `CB-01`. Deciding the default before the name would be deciding it
+twice.
+
+**Done when.** A fresh install of the DX binary presents `dx_codebase` as its
+only tool without the user passing a flag, and `--tool-profile=all` still
+presents the upstream menu.
+
 ---
 
 MIT OR Apache-2.0

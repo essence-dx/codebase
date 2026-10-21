@@ -9,6 +9,7 @@
 #include "test_framework.h"
 
 #include <mcp/dx_surface.h>
+#include <mcp/mcp.h>
 #include <yyjson/yyjson.h>
 
 #include <stdlib.h>
@@ -206,7 +207,7 @@ TEST(dx_review_may_change_the_committed_type) {
     const char *args =
         "{\"question\":\"who calls the handler\",\"draft\":{\"reason\":\"search first\","
         "\"type\":\"search\"},\"review\":\"a trace is the smaller answer now\","
-        "\"request\":{\"type\":\"trace\",\"start\":\"handleRequest\"}}";
+        "\"request\":{\"type\":\"trace\",\"function_name\":\"handleRequest\"}}";
     int rc = dx_surface_parse(args, &req, &err);
     ASSERT_EQ(rc, 0);
     ASSERT_EQ(req.draft_type, DX_REQ_SEARCH);
@@ -480,7 +481,7 @@ TEST(dx_unknown_source_policy_is_rejected) {
     char *err = NULL;
     const char *args =
         "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"details\"},\"review\":\"v\","
-        "\"request\":{\"type\":\"details\",\"source\":\"whatever\"}}";
+        "\"request\":{\"type\":\"details\",\"qualified_name\":\"a.b\",\"source\":\"whatever\"}}";
     int rc = dx_surface_parse(args, &req, &err);
     ASSERT_EQ(rc, -1);
     ASSERT_NOT_NULL(err);
@@ -846,6 +847,208 @@ TEST(dx_the_dx_envelope_replaces_a_base_key_of_the_same_name) {
     PASS();
 }
 
+TEST(dx_the_profile_values_are_contiguous_and_the_last_one_is_dx) {
+    /* The daemon's context handshake bounds the tool profile against
+     * CBM_MCP_TOOL_PROFILE_LAST. When DX was added as 3 and the bound still
+     * said SCOUT, the DX surface was rejected by that handshake and the
+     * server exited instead of starting - a failure that only showed up in
+     * daemon mode. The enum is pinned here so that a profile added later
+     * cannot slip below the bound. */
+    ASSERT_EQ((int)CBM_MCP_TOOL_PROFILE_ALL, 0);
+    ASSERT_EQ((int)CBM_MCP_TOOL_PROFILE_ANALYSIS, 1);
+    ASSERT_EQ((int)CBM_MCP_TOOL_PROFILE_SCOUT, 2);
+    ASSERT_EQ((int)CBM_MCP_TOOL_PROFILE_DX, 3);
+    ASSERT_EQ((int)CBM_MCP_TOOL_PROFILE_LAST, (int)CBM_MCP_TOOL_PROFILE_DX);
+    PASS();
+}
+
+TEST(dx_a_request_missing_the_field_that_identifies_the_symbol_is_refused) {
+    /* The DX surface is the only schema the agent sees, so it has to carry
+     * the base tool's own requirements. A 'trace' request that does not say
+     * which function is not a question the graph can answer, and the refusal
+     * says so by name. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"who calls it\",\"draft\":{\"reason\":\"r\",\"type\":\"trace\"},"
+        "\"review\":\"v\",\"request\":{\"type\":\"trace\"}}";
+    int rc = dx_surface_parse(args, &req, &err);
+    ASSERT_EQ(rc, -1);
+    ASSERT_NOT_NULL(err);
+    ASSERT_TRUE(strstr(err, "function_name") != NULL);
+    ASSERT_TRUE(strstr(err, "trace") != NULL);
+    free(err);
+    PASS();
+}
+
+TEST(dx_a_details_request_without_a_qualified_name_is_refused) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"details\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"details\"}}";
+    int rc = dx_surface_parse(args, &req, &err);
+    ASSERT_EQ(rc, -1);
+    ASSERT_NOT_NULL(err);
+    ASSERT_TRUE(strstr(err, "qualified_name") != NULL);
+    free(err);
+    PASS();
+}
+
+TEST(dx_a_request_with_the_field_it_needs_is_accepted) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"details\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"details\",\"qualified_name\":\"a.b.c\"}}";
+    int rc = dx_surface_parse(args, &req, &err);
+    ASSERT_EQ(rc, 0);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_the_session_project_fills_in_a_request_that_did_not_name_one) {
+    /* Every base tool requires a project and the base has no implicit
+     * fallback, so without this the agent would have to know a name it has
+     * no way of knowing. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\"}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), 0);
+    ASSERT_EQ(dx_surface_apply_session_project(&req, "my-project"), 0);
+
+    yyjson_doc *doc = yyjson_read(req.args_json, strlen(req.args_json), 0);
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    ASSERT_STR_EQ(yyjson_get_str(yyjson_obj_get(root, "project")), "my-project");
+    /* The request's own fields survive the rewrite. */
+    ASSERT_STR_EQ(yyjson_get_str(yyjson_obj_get(root, "query")), "foo");
+    yyjson_doc_free(doc);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_a_request_that_names_its_own_project_keeps_it) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\",\"project\":\"mine\"}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), 0);
+    ASSERT_EQ(dx_surface_apply_session_project(&req, "session-project"), 0);
+
+    yyjson_doc *doc = yyjson_read(req.args_json, strlen(req.args_json), 0);
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    ASSERT_STR_EQ(yyjson_get_str(yyjson_obj_get(root, "project")), "mine");
+    yyjson_doc_free(doc);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_the_session_project_does_nothing_when_there_is_no_session) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\"}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), 0);
+    ASSERT_EQ(dx_surface_apply_session_project(&req, NULL), 0);
+
+    yyjson_doc *doc = yyjson_read(req.args_json, strlen(req.args_json), 0);
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    ASSERT_NULL(yyjson_obj_get(root, "project"));
+    yyjson_doc_free(doc);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_the_schema_names_the_field_each_type_needs) {
+    /* The schema is the only thing the agent reads, so it has to carry the
+     * requirements. */
+    const char *schema = dx_surface_tool_schema();
+    yyjson_doc *doc = yyjson_read(schema, strlen(schema), 0);
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    yyjson_val *required = yyjson_obj_get(root, "x-dx-required");
+    ASSERT_TRUE(yyjson_is_obj(required));
+    ASSERT_STR_EQ(yyjson_get_str(yyjson_obj_get(required, "trace")), "function_name");
+    ASSERT_STR_EQ(yyjson_get_str(yyjson_obj_get(required, "details")), "qualified_name");
+    ASSERT_STR_EQ(yyjson_get_str(yyjson_obj_get(required, "outline")), "file_path");
+    ASSERT_STR_EQ(yyjson_get_str(yyjson_obj_get(required, "search")), "");
+
+    /* And the project is documented as optional, because the session fills
+     * it in. */
+    yyjson_val *request = yyjson_obj_get(yyjson_obj_get(root, "properties"), "request");
+    yyjson_val *project = yyjson_obj_get(yyjson_obj_get(request, "properties"), "project");
+    ASSERT_NOT_NULL(project);
+    yyjson_doc_free(doc);
+    PASS();
+}
+
+TEST(dx_an_error_answer_does_not_say_the_answer_is_complete) {
+    /* "the answer is complete" on a failed answer is a lie the agent acts
+     * on: it would stop. An error's next step is to read the error. */
+    const char *error_result =
+        "{\"content\":[{\"type\":\"text\",\"text\":\"project not found\"}],"
+        "\"structuredContent\":{\"error\":\"project not found\"},\"isError\":true}";
+    char *wrapped = dx_surface_wrap_result(error_result, "the indexed graph", NULL, DX_NEXT_ANSWER,
+                                            "the answer is complete");
+    ASSERT_NOT_NULL(wrapped);
+    yyjson_doc *doc = yyjson_read(wrapped, strlen(wrapped), 0);
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    yyjson_val *next = yyjson_obj_get(root, "next");
+    ASSERT_STR_EQ(yyjson_get_str(yyjson_obj_get(next, "kind")), DX_NEXT_INSPECT);
+    const char *detail = yyjson_get_str(yyjson_obj_get(next, "detail"));
+    ASSERT_NOT_NULL(detail);
+    ASSERT_TRUE(strstr(detail, "error") != NULL);
+    /* The error flag survives the wrapping. */
+    ASSERT_TRUE(yyjson_is_true(yyjson_obj_get(root, "isError")));
+    yyjson_doc_free(doc);
+    free(wrapped);
+    PASS();
+}
+
+TEST(dx_a_successful_answer_keeps_its_next_step) {
+    const char *ok_result =
+        "{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],"
+        "\"structuredContent\":{\"rows\":[]},\"isError\":false}";
+    char *wrapped = dx_surface_wrap_result(ok_result, "the indexed graph", NULL, DX_NEXT_ANSWER,
+                                            "the answer is complete");
+    ASSERT_NOT_NULL(wrapped);
+    yyjson_doc *doc = yyjson_read(wrapped, strlen(wrapped), 0);
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    yyjson_val *next = yyjson_obj_get(root, "next");
+    ASSERT_STR_EQ(yyjson_get_str(yyjson_obj_get(next, "kind")), DX_NEXT_ANSWER);
+    yyjson_doc_free(doc);
+    free(wrapped);
+    PASS();
+}
+
+TEST(dx_the_audit_does_not_claim_the_review_said_something_it_did_not) {
+    /* The review is free text. The layer cannot read "actually use search
+     * instead" and turn it into a type, so it knows only that the committed
+     * type is not the drafted one. Claiming that "the review changed it to
+     * X" would be a claim about the review's content the server cannot back
+     * - and a reader would take X as the review's own words. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"details\",\"qualified_name\":\"a.b\"}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), 0);
+    ASSERT_EQ(req.draft_type, DX_REQ_SEARCH);
+    ASSERT_EQ(req.request_type, DX_REQ_DETAILS);
+
+    char *audit = dx_surface_audit_text(&req, "the indexed graph");
+    ASSERT_NOT_NULL(audit);
+    ASSERT_TRUE(strstr(audit, "draft proposed 'search'") != NULL);
+    ASSERT_TRUE(strstr(audit, "committed request type is 'details'") != NULL);
+    ASSERT_NULL(strstr(audit, "review changed"));
+    free(audit);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
 TEST(dx_the_schema_documents_the_answer_policy) {
     const char *schema = dx_surface_tool_schema();
     yyjson_doc *doc = yyjson_read(schema, strlen(schema), 0);
@@ -914,5 +1117,16 @@ SUITE(dx_surface) {
     RUN_TEST(dx_the_placeholder_of_an_absent_body_is_not_a_body);
     RUN_TEST(dx_bodies_are_counted_wherever_the_base_puts_them);
     RUN_TEST(dx_the_dx_envelope_replaces_a_base_key_of_the_same_name);
+    RUN_TEST(dx_the_profile_values_are_contiguous_and_the_last_one_is_dx);
+    RUN_TEST(dx_a_request_missing_the_field_that_identifies_the_symbol_is_refused);
+    RUN_TEST(dx_a_details_request_without_a_qualified_name_is_refused);
+    RUN_TEST(dx_a_request_with_the_field_it_needs_is_accepted);
+    RUN_TEST(dx_the_session_project_fills_in_a_request_that_did_not_name_one);
+    RUN_TEST(dx_a_request_that_names_its_own_project_keeps_it);
+    RUN_TEST(dx_the_session_project_does_nothing_when_there_is_no_session);
+    RUN_TEST(dx_the_schema_names_the_field_each_type_needs);
+    RUN_TEST(dx_an_error_answer_does_not_say_the_answer_is_complete);
+    RUN_TEST(dx_a_successful_answer_keeps_its_next_step);
+    RUN_TEST(dx_the_audit_does_not_claim_the_review_said_something_it_did_not);
     RUN_TEST(dx_the_schema_documents_the_answer_policy);
 }

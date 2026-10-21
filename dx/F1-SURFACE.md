@@ -70,6 +70,33 @@ surface translates them into the base's own vocabulary - `source_mode` and
 `max_output_tokens` - and a caller who sets the base's parameter directly keeps
 their value, because an explicit parameter beats a default.
 
+`source: "full"` is **refused** on every request type except `details`,
+because `source_mode` is only understood by `get_code_snippet`. On any other
+type it would be a silent no-op, and a silent no-op is what this surface
+exists to prevent.
+
+**The fields a request needs.** The DX surface is the **only** schema the
+agent sees - there is no second tool to read the base tool's schema from - so
+the DX layer carries the base tool's own requirements itself:
+
+| Type | Needs |
+| --- | --- |
+| `search`, `architecture`, `schema`, `coverage`, `changes` | nothing beyond `type` |
+| `trace`, `impact` | `function_name` |
+| `details` | `qualified_name` |
+| `outline` | `file_path` |
+
+A request missing one of those is **refused with the field named**, not
+forwarded for the base to reject in its own words. The same list is in the
+tool schema under `x-dx-required`, so the agent can read it rather than
+discover it.
+
+`project` is deliberately **not** in that list. Every base tool requires one
+and the base has no implicit fallback (`resolve_store_internal`: *"project is
+required - no implicit fallback"*), but the session already knows which project
+it is on, so the DX layer fills it in from the session. A request that names
+its own project keeps it.
+
 **Output** (a tool result with text content, plus):
 
 | Field | Meaning |
@@ -77,6 +104,15 @@ their value, because an explicit parameter beats a default.
 | `audit` | What the server checked this answer against. Never a claim the server cannot back. |
 | `shape` | What the answer carried and what it cost: `source` (the policy in force), `tokens` (the estimate), `budget`, `over_budget`, `excess`, `bodies_included`. |
 | `next` | `answer` (you have enough), `inspect` (one more named request), or `escape`. |
+
+An answer the base refused or failed is **not** an answer: its `next` is
+`inspect` and its detail says to read the error. "The answer is complete" on
+a failed answer is a lie the agent would act on.
+
+The `audit` states what it can back. The review is free text, so the layer
+cannot report what the review *said*; when the committed type differs from
+the drafted one it says the committed type **is** the one that was answered,
+and not that the review named it.
 
 **Token accounting.** One rate, used by both files: four UTF-8 bytes per token.
 The base states the same contract in `src/mcp/mcp.c`
@@ -159,7 +195,7 @@ both a DX session and a plain session.
 | 8 | `request.type` = `escape` | parses; no graph dispatch; bail-out text |
 | 9 | `draft.type` != `request.type` | parses; committed type is `request.type`; audit records both |
 | 10 | Type-specific fields forwarded | the rebuilt args JSON carries them verbatim |
-| 11 | `project` passthrough | present in the rebuilt args JSON |
+| 11 | `project` | the caller's own is kept; otherwise the session's is filled in |
 | 12 | `escape` in the type list | `escape` resolves to the bail-out, not to a base tool |
 | 13 | Every known type maps | each maps to the expected base tool name |
 | 14 | Response wrapping | `audit`, `shape` and `next` present; `next` is one of the three values |
@@ -173,6 +209,11 @@ both a DX session and a plain session.
 | 22 | An answer over the budget | **refused**, not truncated; the excess is named |
 | 23 | An answer inside the budget | passes through as a fresh buffer, never the caller's pointer |
 | 24 | No budget | no gate |
+| 25 | `source: "full"` on a type that cannot honour it | rejected, message names `request.source` |
+| 26 | A malformed `max_tokens` | rejected, message names `request.max_tokens` - never silently ignored |
+| 27 | A request missing the field its type needs | rejected, message names the field |
+| 28 | A request with no `project` | the session's project is filled in |
+| 29 | The base refused or failed | `next` is `inspect`; `isError` is set; the DX refusal sets it too |
 | 25 | The shape | reports the source policy, the tokens, the budget, the excess and the bodies |
 | 26 | Source bodies counted | one for a result carrying `source`, zero without |
 | 27 | The schema advertises the policy | the `source` enum, its default and `max_tokens` bounds are all present |

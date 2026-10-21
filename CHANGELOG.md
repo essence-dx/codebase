@@ -19,6 +19,214 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `feat:` the request says what it needs, and the session says which project
+
+**Two more flaws, both found by reading the base's own tool schemas out of the
+running server rather than from the source.**
+
+**Flaw 6 - the DX schema never said what a request needs.** The DX surface is
+the only schema the agent sees - that is the entire point of a one-tool
+surface - so when the schema said the request's other fields are "the base
+tool's own parameters and are forwarded verbatim", it was describing something
+the agent had no way to look up. There is no second tool to read
+`search_graph`'s schema from. So the agent had to send a request, be told it
+was wrong, and read the error to find out what the tool wanted. That is the
+"menu the agent never navigates" problem in a new place: the DX surface
+removed the menu and left the guessing.
+
+Read straight out of the built server, the base's own requirements are:
+
+| Type | Base tool | Required by the base |
+| --- | --- | --- |
+| `search` | `search_graph` | `project` |
+| `trace` | `trace_path` | `function_name`, `project` |
+| `impact` | `trace_path` | `function_name`, `project` |
+| `details` | `get_code_snippet` | `qualified_name`, `project` |
+| `outline` | `get_file_outline` | `project`, `file_path` |
+| `architecture` | `get_architecture` | `project` |
+| `schema` | `get_graph_schema` | `project` |
+| `coverage` | `check_index_coverage` | `project` |
+| `changes` | `detect_changes` | `project` |
+
+**The fix.** The DX layer now carries the requirement itself and checks the
+request against it. A `trace` request with no `function_name` is **refused
+with the field named** - *"a 'trace' request needs function_name, and the
+request does not have function_name"* - instead of being forwarded to a base
+tool that will reject it in its own words. The schema carries the same list
+in an `x-dx-required` block, so the agent can read it rather than discover
+it.
+
+**Flaw 7 - the agent had to name the project, and it cannot know the name.**
+Every base tool requires a `project`, and the base has **no implicit
+fallback** - `src/mcp/mcp.c`'s `resolve_store_internal` says so in as many
+words:
+
+```c
+if (!project) {
+    return NULL; /* project is required - no implicit fallback */
+}
+```
+
+So every DX request had to carry a project name - the one thing an agent
+working on "this repository" has no way of knowing. The session already knows
+which project it is on (`cbm_mcp_server_session_project`), and the base's own
+help text says "the session project's index refreshes automatically". So the
+DX layer now **fills the project in from the session** when the request did
+not name one, and a request that names its own project keeps it.
+
+**Why this is a DX improvement and not a convenience.** The thesis of the
+surface is that the agent asks a *question about the code*, not a question
+about a project and a symbol. Making it name the project was leaking the
+base's plumbing into the surface.
+
+**One more correction, in the instructions.** The DX profile's server
+instructions described `impact` as "what a change affects". That is
+`detect_changes`' job, and `impact` dispatches to `trace_path`. It is now
+described as what it is - **"what depends on a symbol: who breaks if it
+changes"** - and the instructions point at `x-dx-required` and say not to
+send `project` unless a different one is meant.
+
+**And two more flaws, found by reading the server's own answer.** The probe
+drove the built binary with a complete envelope and got back an error - the
+repository is not indexed here - and the answer said:
+
+```
+audit: Answered from the indexed graph. The committed request type was 'details' ...
+next:  {"kind":"answer","detail":"the answer is complete; read the source it names if you need more"}
+text:  {"error":"project not found or not indexed", ...}
+```
+
+**"the answer is complete" on a failed answer.** An agent that reads `next` and
+stops has stopped on a failure. So:
+
+- When the underlying result carries `isError`, the `next` kind is now
+  **`inspect`** and the detail says the answer was an error and to read it.
+- And the DX layer's **own refusal** - the over-budget answer that is
+  refused rather than truncated - did not set `isError` at all. A refusal
+  that reads like a success with an odd body is exactly the failure this
+  surface exists to prevent, so it now sets `isError`, like every base error.
+
+**Executed.**
+
+| Check | Result |
+| --- | --- |
+| The surface contract tests | **54 passed**, exit 0 (was 44) |
+| The governance contract tests | 23 passed, exit 0 |
+| The memory contract tests | 12 passed, exit 0 |
+| **89 DX contract tests in total** | all green |
+| `gcc -fanalyzer` over the three DX modules and their three test files | **clean** |
+| The base tools' required fields, read from the running server | the table above |
+| The DX surface, driven over real stdio against the built binary | one tool; the four-field envelope enforced; `audit`, `shape` and `next` present on every answer |
+| The `isError` / `next` / session-project changes | unit-tested; **not yet in a built binary** - the receipt below is from the binary built at 10:29, which carries the profile fix |
+
+**New house tests**, where both halves are linked and can be compared:
+
+- `dx_the_required_fields_match_the_base_tools_own_schemas` - for every DX
+  type, every field the base tool requires (other than `project`) is in the
+  DX layer's list, and `project` is not. If the base changes a tool's
+  requirements, this fails.
+- `dx_the_schema_names_the_same_required_fields_as_the_layer` - the schema
+  the agent reads and the list the layer enforces say the same thing.
+
+### 2026-10-21 - `fix:` the DX profile could not start the server at all
+
+**The worst flaw found in this audit, and the one the unit tests could never
+have caught.** The DX surface - the whole reason this fork exists - **did not
+work in the product.** Not "worked badly": the server exited immediately.
+
+**The reproduction, with the built binary.**
+
+```
+> codebase-memory-mcp.exe --tool-profile=dx
+exit code: 1
+stderr: codebase-memory-mcp: daemon session context was rejected
+responses: 0
+```
+
+Zero JSON-RPC responses. The process refused to serve. Every DX feature
+built so far - the surface, the answer policy, the governance verdicts, the
+anchored memory - was **unreachable**, because the only way to reach it is the
+DX profile, and the DX profile could not start.
+
+**Why.** `src/mcp/mcp.h` puts the DX profile at 3:
+
+```c
+CBM_MCP_TOOL_PROFILE_ALL = 0,
+CBM_MCP_TOOL_PROFILE_ANALYSIS = 1,
+CBM_MCP_TOOL_PROFILE_SCOUT = 2,
+CBM_MCP_TOOL_PROFILE_DX = 3,
+```
+
+But the daemon's context handshake bounded the profile at `SCOUT`:
+
+```c
+/* src/daemon/application.c, in both the client and the daemon */
+tool_profile > CBM_MCP_TOOL_PROFILE_SCOUT ||
+profile_value > (uint8_t)CBM_MCP_TOOL_PROFILE_SCOUT ||
+```
+
+So DX - which is 3 - was **outside the valid range**. The client sent it, the
+daemon rejected it, and `src/main.c` turned that rejection into
+`EXIT_FAILURE` with "daemon session context was rejected" on stderr. The
+upstream code was not wrong: it had three profiles, and the bound was the
+third. **Adding a fourth profile without updating the bound is the bug**, and
+the bound was written against a *named profile* rather than against "the
+highest one", so nothing about the change made it look wrong.
+
+**Why the tests did not catch it.** Every DX test calls the functions
+directly. The profile is the *process-level* selection, and nothing in the
+unit suites ever went through the daemon handshake. **A green suite, 79 tests
+passing, and a product that cannot start.** The only thing that found it was
+running the built binary with the flag a user would use.
+
+**The fix (DX).** The bound is now written against a name that means what it
+says:
+
+```c
+/* The highest valid profile value. A new profile added above this line is
+ * accepted by the bounds automatically; a new profile added below it is not,
+ * and that is the point. */
+CBM_MCP_TOOL_PROFILE_LAST = CBM_MCP_TOOL_PROFILE_DX,
+```
+
+Both handshake sites now bound against `CBM_MCP_TOOL_PROFILE_LAST`. Five
+`_Static_assert`s in `src/mcp/mcp.c` pin the enum to be contiguous from 0 with
+DX last, so a profile added later has to be added above that line and `LAST`
+updated - and if it is not, the build fails instead of the server refusing to
+start. The comment at the enum records the exact incident, because the next
+person to add a profile needs to know what happens if they forget.
+
+**A second, quieter flaw in the same area.** The DX profile had **no server
+instructions of its own.** `MCP_SERVER_INSTRUCTIONS` (the generic upstream
+text), `MCP_ANALYSIS_SERVER_INSTRUCTIONS` and `MCP_SCOUT_SERVER_INSTRUCTIONS`
+each exist, and the profile switch covered only the latter two - so an agent
+connecting with the DX profile was handed instructions describing a
+seventeen-tool menu it could not call, and was never told that the surface
+requires four fields, that an over-budget answer is refused rather than
+truncated, or where to look when the graph does not know. `MCP_DX_SERVER_
+INSTRUCTIONS` now says all of that, and the profile switch selects it.
+
+**Executed.**
+
+| Check | Result |
+| --- | --- |
+| `--tool-profile=dx` against the built binary, **before** the fix | exit 1, "daemon session context was rejected", **0 responses** |
+| `--tool-profile=dx` against the built binary, **after** the fix | see the receipt below |
+| `tools/list` under the DX profile | exactly one tool: `dx_codebase`, marked `alwaysLoad` |
+| `tools/call` with a missing envelope | refused with the missing fields named |
+| The surface contract tests | 44 passed, exit 0 |
+| `gcc -fanalyzer` over the three DX modules and their three test files | **clean** |
+
+**New house tests** (they run in the project's own runner, not standalone):
+
+- `dx_profile_parses_from_the_flag` - both spellings work, an unknown value
+  fails closed instead of widening the surface.
+- `dx_profile_does_not_open_the_http_surface` - a restricted profile must not
+  start a second unrestricted surface.
+- `dx_profile_advertises_exactly_one_tool` - the thesis in one assertion: the
+  DX profile exposes `dx_codebase` and nothing else, and it is marked
+  `alwaysLoad` so a client that defers tools behind ToolSearch still shows it.
+
 ### 2026-10-21 - `fix:` five brutal flaws, and the build that now links
 
 **The full product build now completes on this machine.** It did not before

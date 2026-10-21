@@ -133,6 +133,21 @@ typedef enum {
     /* The DX surface: exactly one tool, whose schema carries the reasoning as
      * required arguments. See dx/F1-SURFACE.md. */
     CBM_MCP_TOOL_PROFILE_DX = 3,
+    /* The highest valid profile value.
+     *
+     * Every bound on a profile is written against THIS name, never against a
+     * named profile. A new profile added above this line is accepted by the
+     * bounds automatically; a new profile added below it is not, and that is
+     * the point.
+     *
+     * This is not decoration. The bounds in daemon/application.c were written
+     * against CBM_MCP_TOOL_PROFILE_SCOUT, so when DX was added as 3 it was
+     * silently outside the valid range: the daemon's context handshake
+     * rejected it, and `codebase-memory-mcp --tool-profile=dx` exited with
+     * "daemon session context was rejected" instead of starting. The DX
+     * surface - the whole point of this fork - could not run in daemon mode.
+     */
+    CBM_MCP_TOOL_PROFILE_LAST = CBM_MCP_TOOL_PROFILE_DX,
 } cbm_mcp_tool_profile_t;
 
 /* Parse the process-level tool-profile flag. Explicit malformed or unknown

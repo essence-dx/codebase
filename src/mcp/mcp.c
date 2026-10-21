@@ -1002,6 +1002,21 @@ static void mcp_add_tool_def(yyjson_mut_doc *doc, yyjson_mut_val *tools, int i) 
     yyjson_mut_arr_add_val(tools, tool);
 }
 
+/* The profile values must be contiguous from zero, and the last one must be
+ * DX, so that:
+ *   - the bound the daemon's context handshake applies (written against
+ *     CBM_MCP_TOOL_PROFILE_LAST) covers every profile, and
+ *   - a profile added later has to be added ABOVE this line and LAST updated,
+ *     rather than slipping in below the bound.
+ * Both mistakes become a compile error instead of a runtime rejection that
+ * only shows up in daemon mode. */
+_Static_assert(CBM_MCP_TOOL_PROFILE_ALL == 0, "the profile enum starts at 0");
+_Static_assert(CBM_MCP_TOOL_PROFILE_ANALYSIS == 1, "the profile enum is contiguous");
+_Static_assert(CBM_MCP_TOOL_PROFILE_SCOUT == 2, "the profile enum is contiguous");
+_Static_assert(CBM_MCP_TOOL_PROFILE_DX == 3, "the profile enum is contiguous");
+_Static_assert(CBM_MCP_TOOL_PROFILE_LAST == CBM_MCP_TOOL_PROFILE_DX,
+               "the last profile is the DX surface");
+
 static bool mcp_tool_allowed(cbm_mcp_tool_profile_t profile, const char *name) {
     static const char *const analysis_tools[] = {
         "search_graph",     "query_graph",      "trace_path",     "get_code_snippet",
@@ -1534,6 +1549,34 @@ static const char MCP_SCOUT_SERVER_INSTRUCTIONS[] =
     "check_index_coverage tells whether a cited file was fully indexed. Findings are "
     "provisional.";
 
+static const char MCP_DX_SERVER_INSTRUCTIONS[] =
+    "dx tool profile: exactly ONE tool, dx_codebase, over the code knowledge graph of the "
+    "indexed repository. There is no menu to navigate and no tool to pick. "
+    "Every call carries four required fields, and all four are reasoning, not decoration. "
+    "question: the code question in your own words - do not pre-shape it into symbol names. "
+    "draft: {reason, type} - the request type you believe is the smallest answer, and why. "
+    "review: your own correction - if the draft was wrong or too broad, name the better type "
+    "here, and the review wins. "
+    "request: {type, ...} - the committed request; its other fields are the base tool's own "
+    "parameters and are passed through unchanged. The schema's x-dx-required names the field each "
+    "type needs: function_name for trace and impact, qualified_name for details, file_path for "
+    "outline, nothing for the rest. Do not send 'project' unless you mean a project other than "
+    "this one - the session's project is used when you omit it. "
+    "The request types: search (find symbols by name or pattern), trace (callers, callees, data "
+    "flow), impact (what depends on a symbol - who breaks if it changes), details (one symbol's "
+    "exact source), outline (a symbol's structure without its body), architecture (how modules fit "
+    "together), schema (the graph's own shape), coverage (whether a file was fully indexed), "
+    "changes (the current diff mapped to symbols), escape (this is not a graph question - hand it "
+    "back to your own tools), verify (a claim checked against the graph), certificate (a public "
+    "surface certified against its consumers), enforce (a gate that either holds or does not). "
+    "By default an answer carries relationships and a file:line pointer, not source bodies, so "
+    "the answer does not grow with the repository; set source: 'full' on a details request when "
+    "you need the text. Set max_tokens to put a ceiling on the answer: an answer that does not "
+    "fit is REFUSED with the excess named, never silently truncated, because a shortened answer "
+    "reads as a complete one. "
+    "Every answer carries an audit line saying what was consulted and a next step saying what to "
+    "do next. Where the graph does not know something, the answer says so rather than guessing.";
+
 static char *cbm_mcp_initialize_response_for_profile(const char *params_json,
                                                      cbm_mcp_tool_profile_t profile) {
     /* Determine protocol version: if client requests a version we support,
@@ -1580,6 +1623,8 @@ static char *cbm_mcp_initialize_response_for_profile(const char *params_json,
         instructions = MCP_ANALYSIS_SERVER_INSTRUCTIONS;
     } else if (profile == CBM_MCP_TOOL_PROFILE_SCOUT) {
         instructions = MCP_SCOUT_SERVER_INSTRUCTIONS;
+    } else if (profile == CBM_MCP_TOOL_PROFILE_DX) {
+        instructions = MCP_DX_SERVER_INSTRUCTIONS;
     }
     yyjson_mut_obj_add_str(doc, root, "instructions", instructions);
 
@@ -20729,6 +20774,15 @@ static char *handle_dx_codebase(cbm_mcp_server_t *srv, const char *args_json) {
     }
 
     const char *base_tool = req.base_tool;
+
+    /* The project comes from the session unless the request named one. Every
+     * base tool requires a project and the base has no implicit fallback, so
+     * without this the agent would have to know a name it has no way of
+     * knowing. */
+    if (base_tool) {
+        (void)dx_surface_apply_session_project(&req, cbm_mcp_server_session_project(srv));
+    }
+
     if (!base_tool) {
         /* The governance requests are answered by the DX layer, not by a base
          * tool: they turn graph facts into verdicts, and the verdict policy

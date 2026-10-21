@@ -19,26 +19,44 @@
 /* The dispatch table. One row per request type: the schema discriminator and
  * the base tool it forwards to. "trace" and "impact" share trace_path - the
  * impact direction is one of that tool's own parameters, not a second tool.
- * The governance rows have no base tool: they are answered by the DX layer. */
+ * The governance rows have no base tool: they are answered by the DX layer.
+ *
+ * required_fields is the set of the base tool's own parameters that the
+ * CALLER has to know: the ones that identify what is being asked about.
+ * "project" is deliberately NOT in it - every base tool requires a project,
+ * but the session already knows which project it is on, so the DX layer
+ * fills it in from the session and the agent is not asked for a name it
+ * could not know. The field it does have to know is the one that says
+ * WHICH symbol: "function_name", "qualified_name", "file_path".
+ *
+ * The DX surface is the ONLY schema the agent sees - there is no second tool
+ * to look the base schema up in - so if the DX layer does not carry the base
+ * tool's requirements, the agent cannot know what to send and has to find
+ * out by trial and error. The DX layer therefore checks the request itself
+ * and names what is missing.
+ *
+ * The house test tests/test_mcp.c checks this list against the base tools'
+ * own schemas, so the two cannot drift apart. */
 typedef struct {
     const char *name;
     const char *base_tool;
+    const char *required_fields;
 } dx_type_def_t;
 
 static const dx_type_def_t DX_TYPES[DX_REQ_TYPE_COUNT] = {
-    {"search", "search_graph"},
-    {"trace", "trace_path"},
-    {"impact", "trace_path"},
-    {"details", "get_code_snippet"},
-    {"outline", "get_file_outline"},
-    {"architecture", "get_architecture"},
-    {"schema", "get_graph_schema"},
-    {"coverage", "check_index_coverage"},
-    {"changes", "detect_changes"},
-    {"escape", NULL},
-    {"verify", NULL},
-    {"certificate", NULL},
-    {"enforce", NULL},
+    {"search", "search_graph", ""},
+    {"trace", "trace_path", "function_name"},
+    {"impact", "trace_path", "function_name"},
+    {"details", "get_code_snippet", "qualified_name"},
+    {"outline", "get_file_outline", "file_path"},
+    {"architecture", "get_architecture", ""},
+    {"schema", "get_graph_schema", ""},
+    {"coverage", "check_index_coverage", ""},
+    {"changes", "detect_changes", ""},
+    {"escape", NULL, NULL},
+    {"verify", NULL, NULL},
+    {"certificate", NULL, NULL},
+    {"enforce", NULL, NULL},
 };
 
 const char *dx_surface_type_name(dx_request_type_t type) {
@@ -68,6 +86,83 @@ const char *dx_surface_base_tool(dx_request_type_t type) {
         return NULL;
     }
     return DX_TYPES[type].base_tool;
+}
+
+const char *dx_surface_type_required_fields(dx_request_type_t type) {
+    if (type < 0 || type >= DX_REQ_TYPE_COUNT) {
+        return NULL;
+    }
+    return DX_TYPES[type].required_fields;
+}
+
+/* Fill in the project from the session, when the request did not name one.
+ *
+ * Every base tool requires a project and there is no implicit fallback on
+ * the base side - src/mcp/mcp.c's resolve_store_internal returns NULL for a
+ * NULL project with the comment "project is required - no implicit fallback".
+ * So a request that omits it fails at the base, and the agent has to know a
+ * name it has no way of knowing: the session already knows which project it
+ * is on, and the agent should not have to say so.
+ *
+ * The request's own "project" always wins. This only fills a gap.
+ *
+ * Returns 0 on success, -1 on failure (out of memory, or the forwarded
+ * arguments could not be rewritten). On failure the request is left exactly
+ * as it was. */
+int dx_surface_apply_session_project(dx_surface_request_t *req, const char *session_project) {
+    if (!req || !req->args_json) {
+        return -1;
+    }
+    if (!session_project || !session_project[0]) {
+        return 0; /* nothing to fill in; the base will say what it needs */
+    }
+
+    yyjson_doc *doc = yyjson_read(req->args_json, strlen(req->args_json), 0);
+    if (!doc) {
+        return -1;
+    }
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    if (!yyjson_is_obj(root)) {
+        yyjson_doc_free(doc);
+        return -1;
+    }
+    if (yyjson_obj_get(root, "project")) {
+        /* The request named a project; that one wins. */
+        yyjson_doc_free(doc);
+        return 0;
+    }
+
+    yyjson_mut_doc *mdoc = yyjson_mut_doc_new(NULL);
+    if (!mdoc) {
+        yyjson_doc_free(doc);
+        return -1;
+    }
+    yyjson_mut_val *mroot = yyjson_mut_obj(mdoc);
+    yyjson_mut_doc_set_root(mdoc, mroot);
+
+    size_t idx;
+    size_t max;
+    yyjson_val *key;
+    yyjson_val *val;
+    yyjson_obj_foreach(root, idx, max, key, val) {
+        yyjson_mut_val *copy = yyjson_val_mut_copy(mdoc, val);
+        if (!copy || !yyjson_mut_obj_add_val(mdoc, mroot, yyjson_get_str(key), copy)) {
+            yyjson_mut_doc_free(mdoc);
+            yyjson_doc_free(doc);
+            return -1;
+        }
+    }
+    (void)yyjson_mut_obj_add_str(mdoc, mroot, "project", session_project);
+
+    char *rewritten = yyjson_mut_write(mdoc, 0, NULL);
+    yyjson_mut_doc_free(mdoc);
+    yyjson_doc_free(doc);
+    if (!rewritten) {
+        return -1;
+    }
+    free(req->args_json);
+    req->args_json = rewritten;
+    return 0;
 }
 
 bool dx_surface_type_is_governance(dx_request_type_t type) {
@@ -108,12 +203,40 @@ static const char *DX_TOOL_SCHEMA =
     "'full' asks for the source text and costs what the source costs.\"},"
     "\"max_tokens\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":1000000,"
     "\"description\":\"The token budget for the answer. An answer that does not fit is REFUSED with "
-    "the excess named, never silently truncated. Omit it to use the base tool's own default.\"}},"
+    "the excess named, never silently truncated. Omit it to use the base tool's own default.\"},"
+    /* "project" is in every base tool's required list and in none of the
+     * lists below, because the session already knows which project it is on
+     * and the DX layer fills it in. A request that names its own project
+     * keeps it. */
+    "\"project\":{\"type\":\"string\","
+    "\"description\":\"Optional. The project to answer about. Omit it to use the session's "
+    "project, which is what a request about 'this repository' means.\"}"
+    "},"
     "\"description\":\"The committed request. Its type-specific fields are the base tool's own "
     "parameters and are forwarded verbatim.\"}},"
     "\"additionalProperties\":false,"
     "\"description\":\"The envelope is not optional. Answering requires all four fields; a call that "
-    "omits one is rejected rather than answered from a default.\"}";
+    "omits one is rejected rather than answered from a default.\","
+    /* This surface is the ONLY schema the agent sees: there is no second tool
+     * to look the base tool's schema up in. So the required parameters of the
+     * base tool each type dispatches to are named here, and the DX layer
+     * checks the request against them and refuses with the missing field
+     * named. Without this the agent has to find out what a request needs by
+     * being told it was wrong. */
+    "\"x-dx-required\":{"
+    "\"search\":\"\","
+    "\"trace\":\"function_name\","
+    "\"impact\":\"function_name\","
+    "\"details\":\"qualified_name\","
+    "\"outline\":\"file_path\","
+    "\"architecture\":\"\","
+    "\"schema\":\"\","
+    "\"coverage\":\"\","
+    "\"changes\":\"\","
+    "\"escape\":\"\","
+    "\"verify\":\"\","
+    "\"certificate\":\"\","
+    "\"enforce\":\"\"}}";
 
 const char *dx_surface_tool_schema(void) {
     return DX_TOOL_SCHEMA;
@@ -266,6 +389,55 @@ int dx_surface_parse(const char *args_json, dx_surface_request_t *out, char **er
                           "impact, details, outline, architecture, schema, coverage, changes, escape");
         }
         goto fail;
+    }
+
+    /* The base tool's own required fields. The DX surface is the only schema
+     * the agent sees, so it has to carry the base tool's requirements itself:
+     * without this the agent sends a request missing "project" or
+     * "function_name" and has to read the base's rejection to find out. A
+     * refusal that names the missing field is the difference between a tool
+     * the agent can use and a tool the agent has to probe. */
+    const char *required = dx_surface_type_required_fields(request_type);
+    if (required && required[0]) {
+        char missing[256];
+        missing[0] = '\0';
+        const char *cursor = required;
+        while (*cursor) {
+            while (*cursor == ' ') {
+                cursor++;
+            }
+            if (!*cursor) {
+                break;
+            }
+            const char *end = cursor;
+            while (*end && *end != ' ') {
+                end++;
+            }
+            size_t len = (size_t)(end - cursor);
+            char field[64];
+            if (len > 0 && len < sizeof(field)) {
+                memcpy(field, cursor, len);
+                field[len] = '\0';
+                yyjson_val *present = yyjson_obj_get(request, field);
+                if (!present) {
+                    if (missing[0]) {
+                        (void)snprintf(missing + strlen(missing), sizeof(missing) - strlen(missing),
+                                       ", %s", field);
+                    } else {
+                        (void)snprintf(missing, sizeof(missing), "%s", field);
+                    }
+                }
+            }
+            cursor = end;
+        }
+        if (missing[0]) {
+            if (err) {
+                *err = dx_msg("dx_codebase: a '%s' request needs %s, and the request does not "
+                              "have %s",
+                              request_type_name, required, missing);
+            }
+            goto fail;
+        }
     }
 
     /* The request's own fields, forwarded verbatim. "type" is ours, not the
@@ -462,9 +634,15 @@ char *dx_surface_audit_text(const dx_surface_request_t *req, const char *checked
                       "the answer says so.",
                       source, committed);
     }
-    return dx_msg("Answered from %s. The draft proposed '%s'; the review changed it to '%s', and "
-                  "that is the type that was answered. The graph is the only source consulted; "
-                  "where it does not know, the answer says so.",
+    /* The audit states what it can back. The review is free text: the layer
+     * cannot read "actually use search instead" and turn it into a type, so
+     * it knows only that the committed type is not the drafted one. Saying
+     * "the review changed it to X" would be a claim about the review's
+     * content that the server cannot make - and a reader would take the
+     * committed type as the review's own words. */
+    return dx_msg("Answered from %s. The draft proposed '%s'; the committed request type is '%s', "
+                  "and the committed type is the one that was answered. The graph is the only "
+                  "source consulted; where it does not know, the answer says so.",
                   source, drafted, committed);
 }
 
@@ -496,6 +674,12 @@ static char *dx_tool_result_error(const char *text) {
     yyjson_mut_val *structured = yyjson_mut_obj(doc);
     (void)yyjson_mut_obj_add_str(doc, structured, "error", text);
     (void)yyjson_mut_obj_add_val(doc, root, "structuredContent", structured);
+
+    /* The refusal is a failure, and it has to say so. A result that carries
+     * an error-shaped payload but no isError flag reads like a success with
+     * an odd body, and the agent would treat it as an answer. The base sets
+     * isError on every error result; so does this. */
+    (void)yyjson_mut_obj_add_bool(doc, root, "isError", true);
 
     char *out = yyjson_mut_write(doc, 0, NULL);
     yyjson_mut_doc_free(doc);
@@ -735,6 +919,14 @@ char *dx_surface_wrap_result(const char *result_json, const char *audit_text,
     }
 
     yyjson_mut_val *next = yyjson_mut_obj(mdoc);
+    /* An error is not an answer. If the underlying tool refused or failed,
+     * "the answer is complete" is a lie: the agent would stop, and what it
+     * has is a failure. The next step for an error is to read it. */
+    yyjson_val *is_error = yyjson_obj_get(root, "isError");
+    if (yyjson_is_true(is_error)) {
+        next_kind = DX_NEXT_INSPECT;
+        next_detail = "the answer was an error, not a result; read it and decide what to do next";
+    }
     (void)yyjson_mut_obj_add_str(mdoc, next, "kind", next_kind ? next_kind : DX_NEXT_ANSWER);
     if (next_detail && next_detail[0]) {
         (void)yyjson_mut_obj_add_str(mdoc, next, "detail", next_detail);
