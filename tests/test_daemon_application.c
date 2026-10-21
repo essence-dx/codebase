@@ -777,7 +777,13 @@ TEST(daemon_application_mcp_notification_has_no_response) {
         encoded ? app_test_request(&callbacks, session, context, context_length, &response,
                                    &response_length)
                 : CBM_DAEMON_RUNTIME_APPLICATION_TRANSPORT_ERROR;
-    free(response);
+    /* The sentinel is a marker, not a pointer. It is still in `response` if
+     * the request above never ran, and free() on it is undefined behaviour.
+     * The house pattern elsewhere in this suite is to compare against the
+     * sentinel before touching the value at all. */
+    if (response != (uint8_t *)(uintptr_t)1) {
+        free(response);
+    }
     response = (uint8_t *)(uintptr_t)1;
     response_length = UINT32_MAX;
     cbm_daemon_runtime_application_status_t notification_status =
