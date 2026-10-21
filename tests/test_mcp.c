@@ -25049,6 +25049,137 @@ TEST(dx_the_schema_names_the_same_required_fields_as_the_layer) {
     PASS();
 }
 
+TEST(dx_verify_resolves_its_subject_in_the_session_project) {
+    /* The verify request resolves its subject through the base's own snippet
+     * lookup, so it needs a project exactly as much as a base tool does. It
+     * has no base tool - the DX layer answers it - so when the session
+     * project was only applied to the base-tool requests, the subject was
+     * looked up in no project at all, the lookup failed, and the verdict came
+     * back "unverifiable" for a subject the graph knew perfectly well.
+     *
+     * "The graph does not know" is not the same answer as "the DX layer
+     * failed to ask", and only the first one is honest. */
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+
+    char root[512];
+    snprintf(root, sizeof(root), "%s/cbm-dx-verify-XXXXXX", cbm_tmpdir());
+    ASSERT_TRUE(cbm_mkdtemp(root) != NULL);
+    ASSERT_TRUE(cbm_mcp_server_set_session_context(srv, root, NULL));
+
+    const char *project = cbm_mcp_server_session_project(srv);
+    ASSERT_NOT_NULL(project);
+    ASSERT_TRUE(project[0] != '\0');
+
+    cbm_store_t *store = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(store);
+    ASSERT_EQ(cbm_store_upsert_project(store, project, cbm_tmpdir()), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+    cbm_node_t node = {.project = project,
+                        .label = "Function",
+                        .name = "target_fn",
+                        .qualified_name = "pkg.target_fn",
+                        .file_path = "src/target.c",
+                        .start_line = 10,
+                        .end_line = 20};
+    ASSERT_GT(cbm_store_upsert_node(store, &node), 0);
+
+    /* No project in the request: the session's project is the one that must
+     * be used. */
+    char *result = cbm_mcp_handle_tool(
+        srv, "dx_codebase",
+        "{\"question\":\"does the function exist\",\"draft\":{\"reason\":\"a claim about a "
+        "symbol\",\"type\":\"verify\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"verify\",\"claim\":\"pkg.target_fn exists\","
+        "\"subject\":\"pkg.target_fn\"}}");
+    ASSERT_NOT_NULL(result);
+    ASSERT_TRUE(strstr(result, "confirmed") != NULL);
+    ASSERT_NULL(strstr(result, "unverifiable"));
+    free(result);
+
+    (void)cbm_rmdir(root);
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(dx_verify_reports_unverifiable_for_a_subject_the_graph_does_not_have) {
+    /* The other half of the contract: a subject the graph does not have is
+     * unverifiable, NEVER refuted. The graph not knowing is not evidence
+     * that the claim is false. */
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+
+    char root[512];
+    snprintf(root, sizeof(root), "%s/cbm-dx-verify-missing-XXXXXX", cbm_tmpdir());
+    ASSERT_TRUE(cbm_mkdtemp(root) != NULL);
+    ASSERT_TRUE(cbm_mcp_server_set_session_context(srv, root, NULL));
+
+    const char *project = cbm_mcp_server_session_project(srv);
+    ASSERT_NOT_NULL(project);
+    cbm_store_t *store = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(store);
+    ASSERT_EQ(cbm_store_upsert_project(store, project, cbm_tmpdir()), CBM_STORE_OK);
+    cbm_mcp_server_set_project(srv, project);
+
+    char *result = cbm_mcp_handle_tool(
+        srv, "dx_codebase",
+        "{\"question\":\"does it exist\",\"draft\":{\"reason\":\"r\",\"type\":\"verify\"},"
+        "\"review\":\"v\","
+        "\"request\":{\"type\":\"verify\",\"claim\":\"a claim about nothing\","
+        "\"subject\":\"pkg.not_in_the_graph\"}}");
+    ASSERT_NOT_NULL(result);
+    ASSERT_TRUE(strstr(result, "unverifiable") != NULL);
+    ASSERT_NULL(strstr(result, "refuted"));
+    free(result);
+
+    (void)cbm_rmdir(root);
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(dx_the_instructions_describe_each_type_the_way_the_contract_does) {
+    /* The server instructions are the ONLY description of the surface an
+     * agent ever reads, so they have to say what each type answers, and they
+     * have to say the SAME thing the specification's table says. When the two
+     * were written separately they drifted: the instructions described
+     * `outline` as a symbol's structure when it answers about a FILE, and
+     * they described `certificate` as a public-surface certificate - which
+     * the product does not implement - when it answers whether a change
+     * opened a new path into a declared boundary.
+     *
+     * The instructions are built from the same table, and this test is what
+     * stops them drifting apart again. */
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_mcp_server_set_tool_profile(srv, CBM_MCP_TOOL_PROFILE_DX);
+    char *resp = cbm_mcp_server_handle(
+        srv,
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":"
+        "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},"
+        "\"clientInfo\":{\"name\":\"dx-contract\",\"version\":\"1\"}}}");
+    ASSERT_NOT_NULL(resp);
+    yyjson_doc *doc = yyjson_read(resp, strlen(resp), 0);
+    ASSERT_NOT_NULL(doc);
+    yyjson_val *result = yyjson_obj_get(yyjson_doc_get_root(doc), "result");
+    yyjson_val *instructions = result ? yyjson_obj_get(result, "instructions") : NULL;
+    ASSERT_TRUE(yyjson_is_str(instructions));
+    const char *text = yyjson_get_str(instructions);
+    ASSERT_NOT_NULL(text);
+    for (int i = 0; i < DX_REQ_TYPE_COUNT; i++) {
+        const char *name = dx_surface_type_name((dx_request_type_t)i);
+        const char *purpose = dx_surface_type_purpose((dx_request_type_t)i);
+        ASSERT_NOT_NULL(name);
+        ASSERT_TRUE(purpose != NULL && purpose[0] != '\0');
+        char needle[256];
+        snprintf(needle, sizeof(needle), "%s (%s)", name, purpose);
+        ASSERT_TRUE(strstr(text, needle) != NULL);
+    }
+    yyjson_doc_free(doc);
+    free(resp);
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
 TEST(dx_profile_parses_from_the_flag) {
     /* The DX surface is selected by --tool-profile=dx. Both spellings must
      * work, and an unknown value must fail closed rather than fall back to
@@ -25555,6 +25686,9 @@ SUITE(mcp) {
     RUN_TEST(dx_profile_parses_from_the_flag);
     RUN_TEST(dx_profile_does_not_open_the_http_surface);
     RUN_TEST(dx_profile_advertises_exactly_one_tool);
+    RUN_TEST(dx_verify_resolves_its_subject_in_the_session_project);
+    RUN_TEST(dx_verify_reports_unverifiable_for_a_subject_the_graph_does_not_have);
+    RUN_TEST(dx_the_instructions_describe_each_type_the_way_the_contract_does);
     RUN_TEST(dx_the_required_fields_match_the_base_tools_own_schemas);
     RUN_TEST(dx_the_schema_names_the_same_required_fields_as_the_layer);
 }

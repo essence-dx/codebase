@@ -1049,6 +1049,35 @@ TEST(dx_the_audit_does_not_claim_the_review_said_something_it_did_not) {
     PASS();
 }
 
+TEST(dx_every_request_type_says_what_it_answers) {
+    /* The purpose string is the one-sentence description of what the type
+     * answers, and it is the same sentence the agent-facing instructions
+     * carry. A type with no purpose is a type the agent cannot choose
+     * between. */
+    for (int i = 0; i < DX_REQ_TYPE_COUNT; i++) {
+        const char *name = dx_surface_type_name((dx_request_type_t)i);
+        const char *purpose = dx_surface_type_purpose((dx_request_type_t)i);
+        ASSERT_NOT_NULL(name);
+        ASSERT_TRUE(name[0] != '\0');
+        ASSERT_TRUE(purpose != NULL);
+        ASSERT_TRUE(purpose[0] != '\0');
+    }
+    PASS();
+}
+
+TEST(dx_two_types_never_say_the_same_thing) {
+    /* If two types carried the same purpose the instructions would not
+     * distinguish them, and the agent would have to guess. */
+    for (int i = 0; i < DX_REQ_TYPE_COUNT; i++) {
+        for (int j = i + 1; j < DX_REQ_TYPE_COUNT; j++) {
+            const char *a = dx_surface_type_purpose((dx_request_type_t)i);
+            const char *b = dx_surface_type_purpose((dx_request_type_t)j);
+            ASSERT_TRUE(strcmp(a, b) != 0);
+        }
+    }
+    PASS();
+}
+
 TEST(dx_the_schema_documents_the_answer_policy) {
     const char *schema = dx_surface_tool_schema();
     yyjson_doc *doc = yyjson_read(schema, strlen(schema), 0);
@@ -1128,5 +1157,7 @@ SUITE(dx_surface) {
     RUN_TEST(dx_an_error_answer_does_not_say_the_answer_is_complete);
     RUN_TEST(dx_a_successful_answer_keeps_its_next_step);
     RUN_TEST(dx_the_audit_does_not_claim_the_review_said_something_it_did_not);
+    RUN_TEST(dx_every_request_type_says_what_it_answers);
+    RUN_TEST(dx_two_types_never_say_the_same_thing);
     RUN_TEST(dx_the_schema_documents_the_answer_policy);
 }

@@ -1614,13 +1614,13 @@ static const char MCP_DX_SERVER_INSTRUCTIONS[] =
     "type needs: function_name for trace and impact, qualified_name for details, file_path for "
     "outline, nothing for the rest. Do not send 'project' unless you mean a project other than "
     "this one - the session's project is used when you omit it. "
-    "The request types: search (find symbols by name or pattern), trace (callers, callees, data "
-    "flow), impact (what depends on a symbol - who breaks if it changes), details (one symbol's "
-    "exact source), outline (a symbol's structure without its body), architecture (how modules fit "
-    "together), schema (the graph's own shape), coverage (whether a file was fully indexed), "
-    "changes (the current diff mapped to symbols), escape (this is not a graph question - hand it "
-    "back to your own tools), verify (a claim checked against the graph), certificate (a public "
-    "surface certified against its consumers), enforce (a gate that either holds or does not). "
+    "The request types, each with what it answers: search (find symbols), trace (callers, callees, "
+    "call path), impact (blast radius of a symbol), details (one symbol's source and neighbourhood), "
+    "outline (a file's declaration outline), architecture (repo-level overview), schema (the graph "
+    "schema), coverage (is this scope indexed and fresh), changes (what a diff reaches), escape (not "
+    "a graph question - hand it back to your own tools), verify (does the graph back this claim), "
+    "certificate (did this change open a new path into a declared boundary), enforce (the commit "
+    "gate). "
     "By default an answer carries relationships and a file:line pointer, not source bodies, so "
     "the answer does not grow with the repository; set source: 'full' on a details request when "
     "you need the text. Set max_tokens to put a ceiling on the answer: an answer that does not "
@@ -20830,10 +20830,18 @@ static char *handle_dx_codebase(cbm_mcp_server_t *srv, const char *args_json) {
     /* The project comes from the session unless the request named one. Every
      * base tool requires a project and the base has no implicit fallback, so
      * without this the agent would have to know a name it has no way of
-     * knowing. */
-    if (base_tool) {
-        (void)dx_surface_apply_session_project(&req, cbm_mcp_server_session_project(srv));
-    }
+     * knowing.
+     *
+     * It applies to the GOVERNANCE requests too, and that is not a detail. The
+     * verify request resolves its subject through the base's own snippet
+     * lookup, so it needs a project exactly as much as a base tool does. It
+     * has no base tool - the DX layer answers it - so the "only for base
+     * tools" version of this left the subject to be looked up in no project
+     * at all, the lookup to fail, and the verdict to come back
+     * "unverifiable" for a subject the graph knew perfectly well. The graph
+     * not knowing is not evidence that a claim is false, and neither is the
+     * DX layer failing to ask it the right question. */
+    (void)dx_surface_apply_session_project(&req, cbm_mcp_server_session_project(srv));
 
     if (!base_tool) {
         /* The governance requests are answered by the DX layer, not by a base

@@ -35,28 +35,39 @@
  * out by trial and error. The DX layer therefore checks the request itself
  * and names what is missing.
  *
- * The house test tests/test_mcp.c checks this list against the base tools'
- * own schemas, so the two cannot drift apart. */
+ * The house test tests/test_mcp.c checks required_fields against the base
+ * tools' own schemas, so the two cannot drift apart.
+ *
+ * purpose is the ONE-SENTENCE description of what the type answers, and it
+ * is the same sentence the specification's table carries. The agent-facing
+ * server instructions are the only description of the surface an agent
+ * ever reads, so they are built from this table rather than written out
+ * beside it: when the two were written separately they drifted, and the
+ * instructions ended up promising a public-surface certificate that the
+ * product does not implement, and describing `outline` as a symbol's
+ * structure when it answers about a FILE. The house test checks the
+ * instructions against this table, so they cannot drift again. */
 typedef struct {
     const char *name;
     const char *base_tool;
     const char *required_fields;
+    const char *purpose;
 } dx_type_def_t;
 
 static const dx_type_def_t DX_TYPES[DX_REQ_TYPE_COUNT] = {
-    {"search", "search_graph", ""},
-    {"trace", "trace_path", "function_name"},
-    {"impact", "trace_path", "function_name"},
-    {"details", "get_code_snippet", "qualified_name"},
-    {"outline", "get_file_outline", "file_path"},
-    {"architecture", "get_architecture", ""},
-    {"schema", "get_graph_schema", ""},
-    {"coverage", "check_index_coverage", ""},
-    {"changes", "detect_changes", ""},
-    {"escape", NULL, NULL},
-    {"verify", NULL, NULL},
-    {"certificate", NULL, NULL},
-    {"enforce", NULL, NULL},
+    {"search", "search_graph", "", "find symbols"},
+    {"trace", "trace_path", "function_name", "callers, callees, call path"},
+    {"impact", "trace_path", "function_name", "blast radius of a symbol"},
+    {"details", "get_code_snippet", "qualified_name", "one symbol's source and neighbourhood"},
+    {"outline", "get_file_outline", "file_path", "a file's declaration outline"},
+    {"architecture", "get_architecture", "", "repo-level overview"},
+    {"schema", "get_graph_schema", "", "the graph schema"},
+    {"coverage", "check_index_coverage", "", "is this scope indexed and fresh"},
+    {"changes", "detect_changes", "", "what a diff reaches"},
+    {"escape", NULL, NULL, "not a graph question"},
+    {"verify", NULL, NULL, "does the graph back this claim"},
+    {"certificate", NULL, NULL, "did this change open a new path into a declared boundary"},
+    {"enforce", NULL, NULL, "the commit gate"},
 };
 
 const char *dx_surface_type_name(dx_request_type_t type) {
@@ -86,6 +97,13 @@ const char *dx_surface_base_tool(dx_request_type_t type) {
         return NULL;
     }
     return DX_TYPES[type].base_tool;
+}
+
+const char *dx_surface_type_purpose(dx_request_type_t type) {
+    if (type < 0 || type >= DX_REQ_TYPE_COUNT) {
+        return "";
+    }
+    return DX_TYPES[type].purpose;
 }
 
 const char *dx_surface_type_required_fields(dx_request_type_t type) {

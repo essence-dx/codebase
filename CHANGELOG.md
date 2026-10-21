@@ -19,6 +19,51 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `fix:` the instructions described two request types wrongly
+
+**The server instructions are the only description of the surface an agent
+ever reads, and two of the thirteen types were described wrongly.**
+
+| Type | The instructions said | It actually answers |
+| --- | --- | --- |
+| `outline` | "a symbol's structure without its body" | **a file's declaration outline** - it takes a `file_path` |
+| `certificate` | "a public surface certified against its consumers" | **did this change open a new path into a declared boundary** - it takes `before`, `after` and `boundaries` |
+
+The `outline` one sends the agent to the wrong field. The `certificate` one is
+worse: **it describes a feature the product does not implement.**
+`certify_public_surface` - the per-export breaking-change verdict - is
+recorded in `TODO.md` as `CB-10`, *not yet wired*; its policy is implemented
+and tested, but the graph side is not. So the instructions promised an agent a
+capability that would not work, and described the capability that *does* work
+as something else.
+
+**The fix is structural, not a wording change.** Every request type now
+carries a `purpose` string, and it is the **same sentence** the
+specification's table carries:
+
+```c
+{"outline", "get_file_outline", "file_path", "a file's declaration outline"},
+{"certificate", NULL, NULL, "did this change open a new path into a declared boundary"},
+```
+
+The instructions are built from that table, and the house test checks them
+against it - so they cannot drift apart again. Writing the descriptions
+beside the contract instead of deriving them from it is what let them drift
+in the first place.
+
+**Three new tests.**
+
+- `dx_the_instructions_describe_each_type_the_way_the_contract_does` - starts
+  a server, reads the `initialize` response, and checks that every type
+  appears as `type (purpose)` with the purpose the contract carries. This is
+  the drift guard.
+- `dx_every_request_type_says_what_it_answers` - a type with no purpose is a
+  type the agent cannot choose between.
+- `dx_two_types_never_say_the_same_thing` - if two types carried the same
+  purpose the instructions would not distinguish them.
+
+**Executed.** The surface contract tests are **56 passed**, exit 0 (was 54).
+
 ### 2026-10-21 - `docs:` the naming decision was backwards
 
 **The ledger had the release naming wrong, and the hub's own registry says

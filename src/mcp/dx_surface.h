@@ -120,6 +120,12 @@ const char *dx_surface_base_tool(dx_request_type_t type);
  * tool's requirements itself. The house test checks this list against the
  * base tools' own schemas, so the two cannot drift apart. */
 const char *dx_surface_type_required_fields(dx_request_type_t type);
+const char *dx_surface_type_required_fields(dx_request_type_t type);
+
+/* What this request type answers, in one sentence - the same sentence the
+ * specification's table carries, and the same sentence the agent-facing
+ * server instructions are built from. */
+const char *dx_surface_type_purpose(dx_request_type_t type);
 
 /* Fill the project into a parsed request's forwarded arguments when the
  * request did not name one, taking it from the session.
