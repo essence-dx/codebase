@@ -55,14 +55,38 @@ changed a contract upstream's own tests hold. Keeping it out of the upstream
 profiles leaves those contracts **exactly as upstream wrote them**, and the DX
 profile still exposes exactly one tool.
 
+**And three places that answered one question three ways.** The first fix
+cleared two failures and broke two others, which is how the real shape of the
+problem showed up: `cbm_mcp_tool_count()` returned the **registry** count
+(18) while `tools/list` advertised 17; `cbm_mcp_tool_name(index)` was indexed
+over the registry rather than the advertised set; and `cbm_mcp_tools_help_list()`
+listed all eighteen, so `--help` named a tool the default surface never shows.
+All three now answer *what the default profile advertises*:
+
+```c
+int cbm_mcp_tool_count(void) { /* the advertised count */ }
+const char *cbm_mcp_tool_name(int index) { /* indexed over the advertised tools */ }
+char *cbm_mcp_tools_help_list(void) { /* the advertised tools */ }
+```
+
+That closes a class of bug, not three tests: the registry count, the name
+accessor and the help renderer cannot drift apart again, and the client
+adapters - which emit one entry per tool and must not drift from `tools/list` -
+stay in step.
+
 **The design question this settles.** The DX surface is a *profile*, not a
 tool bolted onto the upstream menu. That is also why `CB-21` matters: the
 profile is opt-in today, and the fork's argument is that the DX surface
 should be what you get by default - not that the upstream menu should carry
 an extra tool.
 
-**Executed.** The three upstream tests pass again, and the DX profile still
-advertises exactly one tool.
+**Executed.**
+
+| Check | Result |
+| --- | --- |
+| The `mcp` suite | **376 passed, 13 skipped, 0 failed** (was 3 failed) |
+| The DX suites | **89 passed**, exit 0 |
+| The DX profile over real stdio | one tool, the envelope enforced, `audit`/`shape`/`next` present, an errored answer's `next` is `inspect` |
 
 ### 2026-10-21 - `fix:` a Windows heap corruption in the base's memory accounting
 
