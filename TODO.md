@@ -545,8 +545,9 @@ project's runner.
 | Fact | Detail |
 | --- | --- |
 | The test build needs `SANITIZE=` | `Makefile.cbm:102` says it: *"Test flags: debug + sanitizers (override SANITIZE= to disable on Windows)"*. The default is `-fsanitize=address,undefined`, and this MinGW has **no sanitizer runtime**: the link fails with `cannot read spec file 'libsanitizer.spec'`. |
+| **`make` does not track flag changes** | Changing `SANITIZE=` does **not** invalidate the objects already built, so the link mixes sanitized and unsanitized objects and fails on `undefined reference to __asan_register_globals`. The test-side objects must be removed first. The two sides are separable by name: the product's link line is **all `prod_*`**, and the test runner's objects have plain names, so deleting every non-`prod_*` object rebuilds the test side without touching the product binary. |
 | The whole tree compiles under the test flags | Every object built, including the ones the sanitizer flags touch. The failure was at the link, and only because of the sanitizer runtime. |
-| Two upstream defects only the test build sees | The `lsp_all` unity unit is compiled with `GRAMMAR_CFLAGS_TEST`, which has **no `-Isrc`** - so a header's cross-directory include must be relative. And GCC 16's `-Wstringop-overflow` catches a **stack buffer overflow** in `tests/test_daemon_ipc.c` that clang, which upstream's CI uses, does not. |
+| Two upstream defects only the test build sees | The `lsp_all` unity unit is compiled with `GRAMMAR_CFLAGS_TEST`, which has **no `-Isrc`** - so a header's cross-directory include must be relative. And GCC 16's `-Wstringop-overflow` catches a **stack buffer overflow** in `tests/test_daemon_ipc.c` that clang, which upstream's CI uses, does not. A third, `-Wfree-nonheap-object`, catches a test that frees a poison pointer. |
 
 **Done when.** `make -f Makefile.cbm SANITIZE= build/c/test-runner` completes
 on this machine, and the DX suites report their pass counts inside the house
