@@ -552,14 +552,29 @@ int dx_surface_parse(const char *args_json, dx_surface_request_t *out, char **er
      * base tool's, so it is dropped. "source" and "max_tokens" are ours too:
      * they are the answer policy, and the base expresses them in its own
      * vocabulary (source_mode, max_output_tokens). */
-    /* The source policy. The base's source_mode is only understood by
-     * get_code_snippet, so this is the one request type the DX layer can
-     * honour. Asking for "full" anywhere else would be a silent no-op - and a
-     * silent no-op is exactly what this tool exists to prevent - so it is
-     * refused, and the refusal names the types that work. */
+    /* The source policy, and a malformed "source" is REFUSED rather than
+     * ignored.
+     *
+     * "source" is the DX layer's own field, so the layer owns its
+     * vocabulary. A caller who sends "source": 5, or "source": null, or
+     * "source": "   " used to have the field dropped and the policy left at
+     * the default - a SILENT DOWNGRADE, where a caller who asked for source
+     * bodies got relationships and nothing said so. The same shape as the
+     * `source: "full"` no-op this already refuses.
+     *
+     * So: absent is one thing and present-but-not-a-policy is another, and
+     * only the second is an error. */
     dx_source_policy_t source_policy = DX_SOURCE_OUTLINE;
-    const char *source_name = dx_str_field(request, "source");
-    if (source_name) {
+    yyjson_val *source_val = yyjson_obj_get(request, "source");
+    if (source_val) {
+        const char *source_name = dx_str_field(request, "source");
+        if (!source_name) {
+            if (err) {
+                *err = dx_msg("dx_codebase: 'request.source' must be a string, either 'outline' "
+                              "or 'full'");
+            }
+            goto fail;
+        }
         if (strcmp(source_name, "outline") == 0) {
             source_policy = DX_SOURCE_OUTLINE;
         } else if (strcmp(source_name, "full") == 0) {
@@ -586,7 +601,10 @@ int dx_surface_parse(const char *args_json, dx_surface_request_t *out, char **er
     bool max_tokens_set = false;
     yyjson_val *budget_val = yyjson_obj_get(request, "max_tokens");
     if (budget_val) {
-        if (!yyjson_is_num(budget_val)) {
+        /* An integer, not a number: the schema says "type": "integer", and a
+         * fractional budget is silently truncated otherwise - 1.5 becomes 1,
+         * a budget tighter than the one that was asked for. */
+        if (!yyjson_is_int(budget_val)) {
             if (err) {
                 *err = dx_msg("dx_codebase: 'request.max_tokens' must be a positive integer");
             }

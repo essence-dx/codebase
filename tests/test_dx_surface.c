@@ -1403,6 +1403,70 @@ TEST(dx_a_required_field_with_real_content_is_accepted) {
     PASS();
 }
 
+TEST(dx_a_malformed_source_is_refused_not_silently_dropped) {
+    /* "source" is the DX layer's own field, so the layer owns its
+     * vocabulary. A caller who sent "source": 5, or null, or "   " used to
+     * have the field dropped and the policy left at the default - a SILENT
+     * DOWNGRADE, where a caller who asked for source bodies got
+     * relationships and nothing said so. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *numbers =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\",\"source\":5}}";
+    ASSERT_EQ(dx_surface_parse(numbers, &req, &err), -1);
+    ASSERT_NOT_NULL(err);
+    ASSERT_TRUE(strstr(err, "request.source") != NULL);
+    free(err);
+    err = NULL;
+
+    const char *nulls =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\",\"source\":null}}";
+    ASSERT_EQ(dx_surface_parse(nulls, &req, &err), -1);
+    ASSERT_NOT_NULL(err);
+    free(err);
+    err = NULL;
+
+    const char *spaces =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\",\"source\":\"   \"}}";
+    ASSERT_EQ(dx_surface_parse(spaces, &req, &err), -1);
+    ASSERT_NOT_NULL(err);
+    free(err);
+    PASS();
+}
+
+TEST(dx_a_fractional_budget_is_refused_not_truncated) {
+    /* The schema says "type": "integer", and a fractional budget was
+     * silently truncated - 1.5 became 1, a budget TIGHTER than the one
+     * that was asked for. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\",\"max_tokens\":1.5}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), -1);
+    ASSERT_NOT_NULL(err);
+    ASSERT_TRUE(strstr(err, "request.max_tokens") != NULL);
+    free(err);
+    PASS();
+}
+
+TEST(dx_a_whole_number_budget_is_still_accepted) {
+    /* The other half. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\",\"max_tokens\":500}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), 0);
+    ASSERT_TRUE(req.max_tokens_set);
+    ASSERT_EQ(req.max_tokens, 500);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
 SUITE(dx_surface) {
     RUN_TEST(dx_envelope_with_all_four_fields_parses);
     RUN_TEST(dx_missing_question_is_rejected);
@@ -1468,6 +1532,9 @@ SUITE(dx_surface) {
     RUN_TEST(dx_the_escape_audit_does_not_claim_the_graph_was_consulted);
     RUN_TEST(dx_the_graph_audit_still_claims_the_graph_was_consulted);
     RUN_TEST(dx_the_schema_documents_the_answer_policy);
+    RUN_TEST(dx_a_malformed_source_is_refused_not_silently_dropped);
+    RUN_TEST(dx_a_fractional_budget_is_refused_not_truncated);
+    RUN_TEST(dx_a_whole_number_budget_is_still_accepted);
     RUN_TEST(dx_a_required_field_of_spaces_is_refused);
     RUN_TEST(dx_a_required_field_with_real_content_is_accepted);
     RUN_TEST(dx_the_audit_says_the_graph_was_not_consulted_for_the_certificate);
