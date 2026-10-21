@@ -149,6 +149,19 @@ The last line is the base's own honest error, passed through untouched. A tool
 that hides a failure behind a cheerful answer is worse than no tool, and the
 DX surface says what happened and what to do next.
 
+That error is also the receipt for the session project. The base has two
+different failures and the probe shows the *named* one:
+
+```c
+return project ? build_project_list_error("project not found or not indexed")
+                : build_missing_project_error();
+```
+
+The request named no project, and the base still said *"project not found or
+not indexed"* rather than *"project is required"*. So the session's project
+was filled in by the DX layer on its way to the base - the feature works in
+the product, not just in a unit test.
+
 **New house tests**, where both halves are linked and can be compared:
 
 - `dx_the_required_fields_match_the_base_tools_own_schemas` - for every DX
