@@ -64,7 +64,22 @@ what was asked for.
 | `dx_a_fractional_budget_is_refused_not_truncated` | the budget is an integer or an error |
 | `dx_a_whole_number_budget_is_still_accepted` | a whole budget still works |
 
-**Executed.** The surface contract tests are **74 passed**, exit 0 (was 69).
+**Executed.**
+
+| Check | Result |
+| --- | --- |
+| The surface contract tests | **74 passed**, exit 0 (was 69) |
+| The governance contract tests | 28 passed, exit 0 |
+| The memory contract tests | 12 passed, exit 0 |
+| **All three, inside the house runner** | **114 passed, exit 0** |
+| The `mcp` suite in the house runner | **380 passed, 13 skipped, 0 failed** - including all nine DX profile tests |
+| `gcc -fanalyzer` | clean over the three DX modules and their three test files |
+
+**How these were found.** An adversarial probe that throws malformed input at
+the three pure DX modules - no store, no graph, no server, so it runs in
+seconds. Three probes, three rounds of findings. It is a much better way to
+look for this class of defect than reading, and it is cheap enough to keep
+running.
 
 ### 2026-10-21 - `fix:` the budget could replace a failure with a size complaint
 
