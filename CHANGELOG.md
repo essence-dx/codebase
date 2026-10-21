@@ -63,14 +63,31 @@ $ nm mem_core.o | grep msize
 mimalloc when the block is one of its:
 
 ```c
-#define CBM_USABLE_SIZE(p)                                                    \
-    (mi_is_in_heap_region((void *)(p)) ? mi_usable_size((void *)(p))         \
-                                       : _msize((void *)(p)))
+static __attribute__((noinline)) size_t cbm_win_usable_size(void *block) {
+    if (!block) {
+        return 0;
+    }
+    if (mi_is_in_heap_region(block)) {
+        return mi_usable_size(block);
+    }
+    return _msize(block);
+}
+#define CBM_USABLE_SIZE(p) cbm_win_usable_size((void *)(p))
 ```
 
 The check is a range test over mimalloc's own region list: safe for a CRT
 pointer, and false before mimalloc has initialised - when there are no
 mimalloc blocks anyway and `_msize` is the right answer.
+
+**Two details are load-bearing, and the comment at the helper says so.** GCC's
+`-Wmaybe-uninitialized` reads a `const`-qualified argument as *"the callee
+only reads the pointee"*, and the pointee of a malloc'd block is uninitialized
+by definition - so with a `const` parameter GCC reports the query as reading
+uninitialized memory and `-Werror` turns that into a build failure. The
+parameter is therefore not `const`, and `charge_size`'s is not either. The
+helper is `noinline` for the same reason at `-O2`: once it is inlined, GCC
+sees the read and complains again. "Tidy" the signature back and the build
+stops.
 
 **How it was established.** By experiment, because the answer had to be
 certain, not argued:
@@ -88,8 +105,13 @@ to msvcrt's `_msize` - the query is always made about a block its own
 allocator made. The defect needs the combination this fork needs: MinGW, the
 `--wrap` allocator, and mimalloc.
 
-**Executed.** The arena repro passes under the runner's allocator with the
-fix, and fails without it.
+**Executed.**
+
+| Check | Result |
+| --- | --- |
+| `mem_core.c` with the project flags | exit 0 at `-O0`, `-O1` and `-O2` |
+| The arena repro under the runner's allocator | passes with the fix, fails without it |
+| The `arena` suite in the house runner | **34 passed, exit 0** (was: heap corruption) |
 
 ### 2026-10-21 - `fix:` a stack buffer overflow in upstream's own test suite
 
