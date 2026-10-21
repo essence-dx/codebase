@@ -20,6 +20,7 @@
 #include "ui/embedded_assets.h"
 #include "ui/layout3d.h"
 #include "ui/atlas.h"
+#include "foundation/printf_attr.h"
 #include "mcp/mcp.h"
 #include "store/store.h"
 #include "pipeline/pass_cross_repo.h"
@@ -518,7 +519,7 @@ void cbm_ui_log_close(void) {
  * call computes a wrapped (huge) remaining size and writes out of bounds. This
  * clamps: on truncation *pos is pinned at bufsz and further appends are no-ops. */
 static void http_appendf(char *buf, size_t bufsz, int *pos, const char *fmt, ...)
-    __attribute__((format(printf, 4, 5)));
+    CBM_PRINTF_FMT(4, 5);
 static void http_appendf(char *buf, size_t bufsz, int *pos, const char *fmt, ...) {
     if (*pos < 0) {
         return;

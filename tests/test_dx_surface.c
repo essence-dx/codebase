@@ -489,6 +489,107 @@ TEST(dx_unknown_source_policy_is_rejected) {
     PASS();
 }
 
+TEST(dx_a_full_source_policy_on_a_type_that_cannot_honour_it_is_rejected) {
+    /* Only get_code_snippet understands source_mode, so "full" anywhere else
+     * would be a silent no-op. The DX layer does not do silent no-ops: it
+     * refuses, and the refusal names the problem. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\",\"source\":\"full\"}}";
+    int rc = dx_surface_parse(args, &req, &err);
+    ASSERT_EQ(rc, -1);
+    ASSERT_NOT_NULL(err);
+    ASSERT_TRUE(strstr(err, "request.source") != NULL);
+    free(err);
+    PASS();
+}
+
+TEST(dx_an_outline_source_policy_is_accepted_on_any_type) {
+    /* "outline" is the default, so asking for it explicitly is harmless
+     * everywhere and is not refused. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\",\"source\":\"outline\"}}";
+    int rc = dx_surface_parse(args, &req, &err);
+    ASSERT_EQ(rc, 0);
+    ASSERT_EQ(req.source_policy, DX_SOURCE_OUTLINE);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_a_malformed_budget_is_rejected_not_ignored) {
+    /* A budget that is present but not a number is an error. Ignoring it
+     * would hand back an unbounded answer to a caller who believes they set
+     * a limit. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\",\"max_tokens\":\"lots\"}}";
+    int rc = dx_surface_parse(args, &req, &err);
+    ASSERT_EQ(rc, -1);
+    ASSERT_NOT_NULL(err);
+    ASSERT_TRUE(strstr(err, "request.max_tokens") != NULL);
+    free(err);
+    PASS();
+}
+
+TEST(dx_a_zero_or_negative_budget_is_rejected) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *zero =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\",\"max_tokens\":0}}";
+    int rc = dx_surface_parse(zero, &req, &err);
+    ASSERT_EQ(rc, -1);
+    ASSERT_NOT_NULL(err);
+    free(err);
+
+    err = NULL;
+    const char *negative =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\",\"max_tokens\":-5}}";
+    rc = dx_surface_parse(negative, &req, &err);
+    ASSERT_EQ(rc, -1);
+    ASSERT_NOT_NULL(err);
+    free(err);
+    PASS();
+}
+
+TEST(dx_a_budget_over_the_cap_is_rejected_not_silently_capped) {
+    /* The cap is 1000000. A caller asking for more is told so, rather than
+     * being given a limit they did not ask for and were not told about. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\",\"max_tokens\":99999999}}";
+    int rc = dx_surface_parse(args, &req, &err);
+    ASSERT_EQ(rc, -1);
+    ASSERT_NOT_NULL(err);
+    ASSERT_TRUE(strstr(err, "1000000") != NULL);
+    free(err);
+    PASS();
+}
+
+TEST(dx_a_well_formed_budget_is_still_accepted) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\",\"max_tokens\":500}}";
+    int rc = dx_surface_parse(args, &req, &err);
+    ASSERT_EQ(rc, 0);
+    ASSERT_TRUE(req.max_tokens_set);
+    ASSERT_EQ(req.max_tokens, 500);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
 TEST(dx_the_source_policy_reaches_the_base_in_its_own_vocabulary) {
     dx_surface_request_t req;
     char *err = NULL;
@@ -684,6 +785,67 @@ TEST(dx_source_bodies_are_counted) {
     PASS();
 }
 
+TEST(dx_the_placeholder_of_an_absent_body_is_not_a_body) {
+    /* The base writes "(source not available)" rather than omitting the key,
+     * so counting key presence would report a body that is not there. */
+    const char *placeholder =
+        "{\"content\":[{\"type\":\"text\",\"text\":\"x\"}],"
+        "\"structuredContent\":{\"qualified_name\":\"a.b\","
+        "\"source\":\"(source not available)\"}}";
+    ASSERT_EQ(dx_surface_count_bodies(placeholder), 0);
+    PASS();
+}
+
+TEST(dx_bodies_are_counted_wherever_the_base_puts_them) {
+    /* A tree result carries a body on each row, not at the top. */
+    const char *tree =
+        "{\"content\":[{\"type\":\"text\",\"text\":\"x\"}],"
+        "\"structuredContent\":{\"rows\":["
+        "{\"qualified_name\":\"a.b\",\"source\":\"int a(void) {}\"},"
+        "{\"qualified_name\":\"c.d\",\"source\":\"int c(void) {}\"}]}}";
+    ASSERT_EQ(dx_surface_count_bodies(tree), 2);
+    PASS();
+}
+
+TEST(dx_the_dx_envelope_replaces_a_base_key_of_the_same_name) {
+    /* A JSON object with the same key twice is ambiguous, so the DX value
+     * replaces the base's rather than sitting beside it. */
+    const char *base_result =
+        "{\"content\":[{\"type\":\"text\",\"text\":\"x\"}],"
+        "\"structuredContent\":{\"qualified_name\":\"a.b\"},"
+        "\"audit\":\"the base's own audit\",\"next\":{\"kind\":\"answer\"}}";
+    char *wrapped = dx_surface_wrap_result(base_result, "the dx audit", NULL, DX_NEXT_ANSWER,
+                                            "the dx detail");
+    ASSERT_NOT_NULL(wrapped);
+
+    /* Exactly one audit, and it is the DX one. */
+    yyjson_doc *doc = yyjson_read(wrapped, strlen(wrapped), 0);
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    const char *audit = yyjson_get_str(yyjson_obj_get(root, "audit"));
+    ASSERT_STR_EQ(audit, "the dx audit");
+
+    size_t idx;
+    size_t max;
+    yyjson_val *key;
+    yyjson_val *val;
+    int audits = 0;
+    int nexts = 0;
+    yyjson_obj_foreach(root, idx, max, key, val) {
+        if (yyjson_equals_str(key, "audit")) {
+            audits++;
+        }
+        if (yyjson_equals_str(key, "next")) {
+            nexts++;
+        }
+    }
+    ASSERT_EQ(audits, 1);
+    ASSERT_EQ(nexts, 1);
+
+    yyjson_doc_free(doc);
+    free(wrapped);
+    PASS();
+}
+
 TEST(dx_the_schema_documents_the_answer_policy) {
     const char *schema = dx_surface_tool_schema();
     yyjson_doc *doc = yyjson_read(schema, strlen(schema), 0);
@@ -733,6 +895,12 @@ SUITE(dx_surface) {
     RUN_TEST(dx_source_defaults_to_outline);
     RUN_TEST(dx_source_full_is_an_explicit_opt_in);
     RUN_TEST(dx_unknown_source_policy_is_rejected);
+    RUN_TEST(dx_a_full_source_policy_on_a_type_that_cannot_honour_it_is_rejected);
+    RUN_TEST(dx_an_outline_source_policy_is_accepted_on_any_type);
+    RUN_TEST(dx_a_malformed_budget_is_rejected_not_ignored);
+    RUN_TEST(dx_a_zero_or_negative_budget_is_rejected);
+    RUN_TEST(dx_a_budget_over_the_cap_is_rejected_not_silently_capped);
+    RUN_TEST(dx_a_well_formed_budget_is_still_accepted);
     RUN_TEST(dx_the_source_policy_reaches_the_base_in_its_own_vocabulary);
     RUN_TEST(dx_a_full_source_policy_does_not_force_the_base);
     RUN_TEST(dx_the_budget_reaches_the_base_as_max_output_tokens);
@@ -743,5 +911,8 @@ SUITE(dx_surface) {
     RUN_TEST(dx_no_budget_means_no_gate);
     RUN_TEST(dx_the_shape_reports_what_the_answer_carried);
     RUN_TEST(dx_source_bodies_are_counted);
+    RUN_TEST(dx_the_placeholder_of_an_absent_body_is_not_a_body);
+    RUN_TEST(dx_bodies_are_counted_wherever_the_base_puts_them);
+    RUN_TEST(dx_the_dx_envelope_replaces_a_base_key_of_the_same_name);
     RUN_TEST(dx_the_schema_documents_the_answer_policy);
 }

@@ -462,43 +462,43 @@ design above and the two defects found are the record:
 governs it, and what else breaks if it changes", and the answer names the
 repositories **consulted and skipped**.
 
-### CB-20 - The Windows build story: MSVC, not MinGW
+### CB-20 - The Windows build story: the build works, the house tests do not run yet
 
-**Evidence.** A full build of the tree on this machine **fails**, and not for a
-reason DX introduced. `src/foundation/arena.h:82` declares
-`cbm_arena_sprintf` with `__attribute__((format(printf, 2, 3)))`. On MinGW that
-attribute resolves to `ms_printf` semantics, which **do not support `%zu`**, so
-every call site using `%zu` fails to compile:
+**Status 2026-10-21 - the build blocker is FIXED.** Option 2 below was taken.
+A new `src/foundation/printf_attr.h` provides `CBM_PRINTF_FMT`, which selects
+`gnu_printf` - always the C99-conformant format - and the three sites that
+carried `format(printf, ...)` now use it. `make -f Makefile.cbm cbm` **links**
+on this machine.
+
+**Why the original diagnosis pointed at the wrong thing.** The first reading
+was that upstream's Windows binary is an MSVC build and MinGW simply cannot
+build the tree. That is not what the evidence says. The implementation of
+`cbm_arena_sprintf` is `vsnprintf` - C99 - and `%zu` works perfectly at
+runtime. Only the *compile-time* attribute was wrong: GCC's `printf` attribute
+means *the target's* printf, and on MinGW that is the Microsoft one, whose
+format dialect has no `%z`. The attribute describes the format string, not the
+runtime library, so describing a `vsnprintf`-backed helper as `gnu_printf` is
+the accurate description rather than a workaround. The tree builds with the
+toolchain that is actually present.
+
+**What is still open.** The **house test binary** has not been built and run.
+The DX suites are wired into `tests/test_main.c` and `Makefile.cbm`
+(`TEST_MCP_SRCS`), but the `test` target has never been built here, so the DX
+suites still run standalone against a small driver rather than inside the
+project's own harness. That is a real gap: the standalone driver supplies its
+own counters and its own `main`, so it does not prove the suites run in the
+project's runner.
+
+**Done when.** `make -f Makefile.cbm test` completes on this machine and the
+DX suites report their pass counts inside the house runner.
+
+**Evidence - the original blocker, for the record.**
 
 ```
 src/pipeline/helm_template.c:2202:72: error: unknown conversion type character 'z' in format
 internal/cbm/doc_pdf.c:1337:70: error: unknown conversion type character 'z' in format
 src/pipeline/pass_k8s.c:4672:58: error: too many arguments for format
 ```
-
-Everything up to the link stage compiles cleanly - all 162 grammars, the
-tree-sitter runtime, SQLite, mimalloc, xxhash and yyjson - and the failure is
-confined to the format attribute under MinGW.
-
-**What to build.** A decision, and it is a product decision rather than a code
-one:
-
-1. **Build on MSVC.** The upstream project ships a native Windows binary and
-   has a `scripts/test-windows.ps1` that drives `make -f Makefile.cbm` - but
-   its Windows releases are MSVC builds. This box has MinGW and no MSVC
-   (`vswhere` is absent), so the sanctioned Windows test path cannot run here.
-2. **Or make the attribute portable** - a small upstream change that guards the
-   `format(printf, ...)` attribute so `%zu` is accepted under MinGW, and the
-   tree builds with the toolchain that is actually present.
-
-**Why it matters.** Until one of these is true, **the full server build cannot
-be run in this environment**, and every DX change is compile-verified and
-unit-tested but not built. That is a real limit on the confidence in the DX
-layer, and it is recorded here rather than glossed over.
-
-**Done when.** `make -f Makefile.cbm cbm` completes on this machine, or
-`scripts/test-windows.ps1` runs the Windows guard suite, and the DX suites
-run inside the house test binary rather than standalone.
 
 ---
 

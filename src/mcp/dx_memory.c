@@ -6,7 +6,14 @@
  */
 #include "mcp/dx_memory.h"
 
-#include <xxhash/xxhash.h>
+/* The vendored xxhash, instantiated into this translation unit. The house
+ * pattern (src/semantic/rotsq.c, src/pipeline/pass_semantic_edges.c) is
+ * XXH_INLINE_ALL, not linking vendored/xxhash/xxhash.c: the product link
+ * does not carry that object, so a module that calls the external symbol
+ * compiles fine in a standalone test and fails to link in the product. */
+#define XXH_INLINE_ALL
+#include "xxhash/xxhash.h"
+
 #include <yyjson/yyjson.h>
 
 #include <stdio.h>

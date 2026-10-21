@@ -14,6 +14,8 @@
 #include <stddef.h>
 #include <stdarg.h>
 
+#include "foundation/printf_attr.h"
+
 #define CBM_ARENA_MAX_BLOCKS 256
 #define CBM_ARENA_DEFAULT_BLOCK_SIZE ((size_t)64 * 1024) /* 64KB */
 
@@ -77,7 +79,7 @@ char *cbm_arena_strdup(CBMArena *a, const char *s);
 char *cbm_arena_strndup(CBMArena *a, const char *s, size_t len);
 
 /* sprintf into arena memory. */
-char *cbm_arena_sprintf(CBMArena *a, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+char *cbm_arena_sprintf(CBMArena *a, const char *fmt, ...) CBM_PRINTF_FMT(2, 3);
 
 /* Reset arena for reuse: keeps first block, frees the rest. */
 void cbm_arena_reset(CBMArena *a);

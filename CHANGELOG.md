@@ -19,6 +19,98 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `fix:` five brutal flaws, and the build that now links
+
+**The full product build now completes on this machine.** It did not before
+this entry, and the reason was not DX's code. One line of upstream's portability
+plus one line of mine were standing in the way.
+
+**Flaw 1 - the build blocker (upstream).** `src/foundation/arena.h` declared
+`cbm_arena_sprintf` with `__attribute__((format(printf, 2, 3)))`. GCC's `printf`
+attribute means *the target's* printf, and on MinGW that is the Microsoft one,
+whose format dialect has no `%z` length modifier. The implementation is
+`vsnprintf` - C99 - so `%zu` works perfectly at runtime; only the compile-time
+check rejected it:
+
+```
+src/pipeline/helm_template.c:2202: error: unknown conversion type character 'z' in format
+internal/cbm/doc_pdf.c:1337:      error: unknown conversion type character 'z' in format
+src/pipeline/pass_k8s.c:4672:     error: too many arguments for format
+```
+
+**The fix (DX).** A new `src/foundation/printf_attr.h` provides
+`CBM_PRINTF_FMT(fmt_index, first_arg)`, which selects `gnu_printf` - always the
+C99-conformant format - and expands to nothing on a compiler without the
+attribute. The attribute is a check on the *format string*, not on the runtime
+library, so describing these three helpers as C99 is the accurate thing to do.
+Applied to all three sites that had the attribute: `arena.h`, `http_server.c`,
+`httpd.h`. The third of those was already guarded by a compiler check, which is
+why the fix belongs in a shared header rather than in one file.
+
+**Flaw 2 - a module that compiled in the test and did not link in the product
+(DX).** `src/mcp/dx_memory.c` called the vendored `XXH64` through an external
+reference. The product link does not carry `vendored/xxhash/xxhash.c`, so the
+linker refused it:
+
+```
+ld.exe: undefined reference to `XXH64'
+```
+
+**The standalone test passed the whole time** - because that test linked
+`xxhash.c` separately. This is the exact shape of flaw the house test binary
+exists to catch, and it is a reminder that a green standalone suite is not a
+built product. The fix is the house pattern (`src/semantic/rotsq.c`,
+`src/pipeline/pass_semantic_edges.c`): `#define XXH_INLINE_ALL` before the
+include, so the implementation is instantiated into the module's own
+translation unit and no link dependency is introduced at all. Verified with
+`nm`: the object now exports no external `XXH` symbol.
+
+**Flaw 3 - a silent no-op in the answer policy (DX).** `request.source: "full"`
+was accepted for every request type, but only `get_code_snippet` understands
+`source_mode`. On every other type the request was a no-op - the caller asked
+for source bodies and got the default, with nothing saying so. A silent no-op
+is exactly what this tool exists to prevent, so `"full"` is now **refused** on
+the types that cannot honour it, and the refusal names the problem. `"outline"`
+is still accepted everywhere, because it is the default and asking for the
+default is not a request that goes unserved.
+
+**Flaw 4 - a malformed budget silently became no budget (DX).**
+`request.max_tokens` was read with a helper that returns 0 for anything out of
+range. A budget of `"lots"`, `0`, `-5` or `99999999` therefore became "no
+budget" - an unbounded answer handed to a caller who believed they had set a
+limit. A budget that is present but malformed is now an **error**, with the
+range named.
+
+**Flaw 5 - the shape report could lie (DX).** Two ways:
+
+- The base writes `"(source not available)"` where a source body would be,
+  rather than omitting the key. Counting key presence therefore reported a
+  body for an answer that carried none. A body now counts only when the value
+  is a real, non-empty string.
+- Only the top level of the payload was inspected, so a tree result - which
+  carries a body on each row - was reported as carrying none. The count is now
+  a walk of the whole payload.
+
+And one more: if a base result already carried an `audit`, `shape` or `next`
+key, the DX wrapper added a second key of the same name. A JSON object with
+one key twice is ambiguous and a parser may take either. The DX value now
+**replaces** the base's rather than sitting beside it.
+
+**Executed.**
+
+| Check | Result |
+| --- | --- |
+| `make -f Makefile.cbm cbm` on MinGW | **links** (was: 3 format errors) |
+| The surface contract tests | **43 passed**, exit 0 (was 34) |
+| The governance contract tests | 23 passed, exit 0 |
+| The memory contract tests | 12 passed, exit 0, with no external `XXH` symbol |
+| `nm` on the memory object | no undefined `XXH` reference |
+| The full server build | **SUCCEEDS** - the DX layer is in the product binary |
+
+**What is still not done.** The **house test binary** has not been built and
+run, so the DX suites still run standalone rather than inside the project's
+own harness. `CB-20` now records that as the remaining step.
+
 ### 2026-10-21 - `docs:` the Windows build story, and one reverted prototype
 
 **Two findings, one of which changes what the DX layer can claim.**

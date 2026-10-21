@@ -272,12 +272,24 @@ int dx_surface_parse(const char *args_json, dx_surface_request_t *out, char **er
      * base tool's, so it is dropped. "source" and "max_tokens" are ours too:
      * they are the answer policy, and the base expresses them in its own
      * vocabulary (source_mode, max_output_tokens). */
+    /* The source policy. The base's source_mode is only understood by
+     * get_code_snippet, so this is the one request type the DX layer can
+     * honour. Asking for "full" anywhere else would be a silent no-op - and a
+     * silent no-op is exactly what this tool exists to prevent - so it is
+     * refused, and the refusal names the types that work. */
     dx_source_policy_t source_policy = DX_SOURCE_OUTLINE;
     const char *source_name = dx_str_field(request, "source");
     if (source_name) {
         if (strcmp(source_name, "outline") == 0) {
             source_policy = DX_SOURCE_OUTLINE;
         } else if (strcmp(source_name, "full") == 0) {
+            if (request_type != DX_REQ_DETAILS) {
+                if (err) {
+                    *err = dx_msg("dx_codebase: 'request.source' is 'full', which this request "
+                                  "type cannot honour; only 'details' can ask for source bodies");
+                }
+                goto fail;
+            }
             source_policy = DX_SOURCE_FULL;
         } else {
             if (err) {
@@ -286,8 +298,29 @@ int dx_surface_parse(const char *args_json, dx_surface_request_t *out, char **er
             goto fail;
         }
     }
-    long long max_tokens = dx_pos_int_field(request, "max_tokens");
-    bool max_tokens_set = max_tokens > 0;
+
+    /* The budget. A budget that is present but malformed is an error, not an
+     * absent budget: silently ignoring it would hand back an unbounded answer
+     * to a caller who believes they set a limit. */
+    long long max_tokens = 0;
+    bool max_tokens_set = false;
+    yyjson_val *budget_val = yyjson_obj_get(request, "max_tokens");
+    if (budget_val) {
+        if (!yyjson_is_num(budget_val)) {
+            if (err) {
+                *err = dx_msg("dx_codebase: 'request.max_tokens' must be a positive integer");
+            }
+            goto fail;
+        }
+        max_tokens = dx_pos_int_field(request, "max_tokens");
+        if (max_tokens <= 0) {
+            if (err) {
+                *err = dx_msg("dx_codebase: 'request.max_tokens' must be between 1 and 1000000");
+            }
+            goto fail;
+        }
+        max_tokens_set = true;
+    }
 
     yyjson_mut_doc *adoc = yyjson_mut_doc_new(NULL);
     if (!adoc) {
@@ -481,6 +514,60 @@ long long dx_surface_estimate_tokens(const char *text) {
  * key in the structured content; the rendered text is not scanned, because the
  * base already decides that shape and rewriting a rendered tree would be
  * guesswork. */
+/* The base writes a placeholder rather than omitting the key when a source
+ * body is not available, so key presence alone would over-report: an answer
+ * with no body at all would be reported as carrying one. A body counts only
+ * when the value is a real, non-empty string. */
+#define DX_SOURCE_PLACEHOLDER "(source not available)"
+
+static bool dx_is_real_body(yyjson_val *value) {
+    if (!yyjson_is_str(value)) {
+        return false;
+    }
+    const char *text = yyjson_get_str(value);
+    if (!text || !text[0]) {
+        return false;
+    }
+    if (strcmp(text, DX_SOURCE_PLACEHOLDER) == 0) {
+        return false;
+    }
+    return true;
+}
+
+/* Count the source bodies anywhere in a payload. The base carries a body
+ * under the key "source" at the top of a snippet result and on the rows of a
+ * tree, so a single top-level lookup would miss the tree ones and the shape
+ * report would under-count. */
+static int dx_count_bodies_in(yyjson_val *val) {
+    if (!val) {
+        return 0;
+    }
+    int count = 0;
+    if (yyjson_is_obj(val)) {
+        size_t idx;
+        size_t max;
+        yyjson_val *key;
+        yyjson_val *child;
+        yyjson_obj_foreach(val, idx, max, key, child) {
+            if (yyjson_equals_str(key, "source")) {
+                if (dx_is_real_body(child)) {
+                    count++;
+                }
+                continue; /* a body is text; there is nothing under it */
+            }
+            count += dx_count_bodies_in(child);
+        }
+    } else if (yyjson_is_arr(val)) {
+        size_t idx;
+        size_t max;
+        yyjson_val *child;
+        yyjson_arr_foreach(val, idx, max, child) {
+            count += dx_count_bodies_in(child);
+        }
+    }
+    return count;
+}
+
 int dx_surface_count_bodies(const char *result_json) {
     if (!result_json) {
         return 0;
@@ -491,12 +578,12 @@ int dx_surface_count_bodies(const char *result_json) {
     }
     int count = 0;
     yyjson_val *root = yyjson_doc_get_root(doc);
-    yyjson_val *structured = yyjson_is_obj(root) ? yyjson_obj_get(root, "structuredContent") : NULL;
-    if (yyjson_is_obj(structured)) {
-        yyjson_val *src = yyjson_obj_get(structured, "source");
-        if (src) {
-            count++;
-        }
+    if (yyjson_is_obj(root)) {
+        yyjson_val *structured = yyjson_obj_get(root, "structuredContent");
+        /* The base's own results carry the payload under structuredContent.
+         * A result that does not have one is walked from the top instead,
+         * so nothing is under-counted just because the shape differs. */
+        count = dx_count_bodies_in(structured ? structured : root);
     }
     yyjson_doc_free(doc);
     return count;
@@ -608,6 +695,14 @@ char *dx_surface_wrap_result(const char *result_json, const char *audit_text,
     yyjson_val *key;
     yyjson_val *val;
     yyjson_obj_foreach(root, idx, max, key, val) {
+        /* The DX envelope owns these three keys. If the base result already
+         * carries one, the DX value replaces it rather than sitting beside
+         * it: a JSON object with the same key twice is ambiguous, and a
+         * parser is free to take either. */
+        if (yyjson_equals_str(key, "audit") || yyjson_equals_str(key, "shape") ||
+            yyjson_equals_str(key, "next")) {
+            continue;
+        }
         yyjson_mut_val *copy = yyjson_val_mut_copy(mdoc, val);
         if (!copy) {
             yyjson_mut_doc_free(mdoc);

@@ -31,6 +31,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "../foundation/constants.h"
+#include "../foundation/printf_attr.h"
 
 /* Maximum request head (request line + headers + terminating CRLFCRLF). */
 #define CBM_HTTP_MAX_HEAD (16 * 1024)
@@ -116,10 +117,7 @@ void cbm_http_req_free(cbm_http_req_t *req);
  * "Connection: close" are always added here — callers must not. */
 void cbm_http_replyf(cbm_http_conn_t *c, int status, const char *extra_headers, const char *fmt,
                      ...)
-#if defined(__GNUC__) || defined(__clang__)
-    __attribute__((format(printf, 4, 5)))
-#endif
-    ;
+    CBM_PRINTF_FMT(4, 5);
 
 /* Binary-safe variant for embedded assets. */
 void cbm_http_reply_buf(cbm_http_conn_t *c, int status, const char *extra_headers, const void *data,
