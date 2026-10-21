@@ -334,6 +334,17 @@ key, the DX wrapper added a second key of the same name. A JSON object with
 one key twice is ambiguous and a parser may take either. The DX value now
 **replaces** the base's rather than sitting beside it.
 
+**And a sixth, found by the test build rather than the product build.**
+`arena.h`'s new `#include "foundation/printf_attr.h"` resolved for the product
+build and failed for the **house test build**, which compiles the internal
+extraction units as a unity build with `GRAMMAR_CFLAGS_TEST` - and that flag
+set has no `-Isrc`. The error named a header that plainly exists, which is
+what a relative-include mistake looks like. The house already had the answer
+written down: `src/foundation/hash_table.h` and `src/foundation/dyn_array.h`
+both include their siblings relatively, each with a comment saying why - *"same
+directory: the lsp_all unit has no -Isrc"*. `arena.h` now does the same.
+Verified by compiling `lsp_all.c` with the grammar flags and no `-Isrc`.
+
 **Executed.**
 
 | Check | Result |
