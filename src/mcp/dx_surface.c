@@ -313,6 +313,55 @@ static long long dx_pos_int_field(yyjson_val *obj, const char *key) {
 
 /* ------------------------------------------------------------------- parse */
 
+/* The names of the fields in `obj` that are not in the allowed set, as a
+ * comma-separated heap string, or NULL when every field is allowed.
+ *
+ * The schema says "additionalProperties": false for the envelope and for
+ * `draft`, and this is what makes that true. Without it an unknown field was
+ * silently IGNORED - and a silently ignored field is the same defect as the
+ * `source: "full"` no-op this surface already refuses: the caller is told
+ * nothing, and a typo ("requets" for "request") is answered as if it were
+ * right. */
+static char *dx_unknown_fields(yyjson_val *obj, const char *const *allowed, int allowed_count) {
+    if (!yyjson_is_obj(obj)) {
+        return NULL;
+    }
+    char *list = NULL;
+    size_t len = 0;
+    size_t idx;
+    size_t max;
+    yyjson_val *key;
+    yyjson_val *val;
+    yyjson_obj_foreach(obj, idx, max, key, val) {
+        const char *name = yyjson_get_str(key);
+        bool known = false;
+        for (int i = 0; i < allowed_count; i++) {
+            if (allowed[i] && strcmp(name, allowed[i]) == 0) {
+                known = true;
+                break;
+            }
+        }
+        if (known) {
+            continue;
+        }
+        size_t need = strlen(name) + (list ? 2 : 0) + 1;
+        char *grown = (char *)realloc(list, len + need);
+        if (!grown) {
+            free(list);
+            return NULL; /* out of memory: do not turn it into a wrong refusal */
+        }
+        list = grown;
+        if (len) {
+            list[len++] = ',';
+            list[len++] = ' ';
+        }
+        memcpy(list + len, name, strlen(name));
+        len += strlen(name);
+        list[len] = '\0';
+    }
+    return list;
+}
+
 int dx_surface_parse(const char *args_json, dx_surface_request_t *out, char **err) {
     if (err) {
         *err = NULL;
@@ -351,6 +400,20 @@ int dx_surface_parse(const char *args_json, dx_surface_request_t *out, char **er
 
     /* The four envelope fields. Each is required: a required field on a typed
      * schema is the one thing a model cannot skip. */
+  /* And nothing else is allowed: the schema says additionalProperties false
+   * for the envelope, and an unknown field is refused rather than ignored. */
+  static const char *const ENVELOPE_FIELDS[] = {"question", "draft", "review", "request"};
+  char *unknown = dx_unknown_fields(root, ENVELOPE_FIELDS, 4);
+  if (unknown) {
+    if (err) {
+      *err = dx_msg("dx_codebase: the envelope has unknown field%s: %s. It has exactly four: "
+                    "question, draft, review and request.",
+                    strchr(unknown, ',') ? "s" : "", unknown);
+    }
+    free(unknown);
+    yyjson_doc_free(doc);
+    return -1;
+  }
     const char *question = dx_str_field(root, "question");
     if (!question) {
         if (err) {
@@ -367,6 +430,18 @@ int dx_surface_parse(const char *args_json, dx_surface_request_t *out, char **er
         }
         goto fail;
     }
+  /* The draft has exactly two fields, and the schema says so. An unknown
+   * one is refused rather than ignored, for the same reason as the envelope's. */
+  static const char *const DRAFT_FIELDS[] = {"reason", "type"};
+  char *draft_unknown = dx_unknown_fields(draft, DRAFT_FIELDS, 2);
+  if (draft_unknown) {
+    if (err) {
+      *err = dx_msg("dx_codebase: 'draft' has unknown field%s: %s. It has exactly two: reason and type.",
+                    strchr(draft_unknown, ',') ? "s" : "", draft_unknown);
+    }
+    free(draft_unknown);
+    goto fail;
+  }
     const char *draft_reason = dx_str_field(draft, "reason");
     if (!draft_reason) {
         if (err) {
@@ -523,6 +598,7 @@ int dx_surface_parse(const char *args_json, dx_surface_request_t *out, char **er
     yyjson_mut_doc_set_root(adoc, aroot);
 
     bool caller_set_max_output_tokens = false;
+    bool caller_set_source_mode = false;
     size_t idx;
     size_t max;
     yyjson_val *key;
@@ -534,6 +610,9 @@ int dx_surface_parse(const char *args_json, dx_surface_request_t *out, char **er
         }
         if (yyjson_equals_str(key, "max_output_tokens")) {
             caller_set_max_output_tokens = true;
+        }
+        if (yyjson_equals_str(key, "source_mode")) {
+            caller_set_source_mode = true;
         }
         yyjson_mut_val *copy = yyjson_val_mut_copy(adoc, val);
         if (!copy) {
@@ -567,8 +646,18 @@ int dx_surface_parse(const char *args_json, dx_surface_request_t *out, char **er
     }
 
     /* The source policy, in the base's vocabulary. Only get_code_snippet takes
-     * source_mode; the other tools answer with relationships already. */
-    if (source_policy == DX_SOURCE_OUTLINE && request_type == DX_REQ_DETAILS) {
+     * source_mode; the other tools answer with relationships already.
+     *
+     * A caller who set source_mode directly keeps their value, exactly as
+     * with max_output_tokens - and NOT adding a second one matters: the
+     * forwarded arguments would otherwise carry the key twice, and a JSON
+     * object with one key twice is ambiguous. A parser is free to take
+     * either, so the base might see the caller's "full" or the layer's
+     * "outline" depending on which it happens to read first. The same rule
+     * for both fields: an explicit parameter beats a default, and the
+     * default is only written when there is no explicit one. */
+    if (source_policy == DX_SOURCE_OUTLINE && request_type == DX_REQ_DETAILS &&
+        !caller_set_source_mode) {
         yyjson_mut_val *mode = yyjson_mut_str(adoc, "outline");
         if (!mode || !yyjson_mut_obj_add_val(adoc, aroot, "source_mode", mode)) {
             yyjson_mut_doc_free(adoc);

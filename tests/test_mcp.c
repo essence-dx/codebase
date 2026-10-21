@@ -25049,6 +25049,18 @@ TEST(dx_the_schema_names_the_same_required_fields_as_the_layer) {
     PASS();
 }
 
+/* The snippet lookup reads the file, so a fixture without one cannot resolve
+ * anything. */
+static bool dx_test_write_file(const char *path, const char *content) {
+    FILE *f = cbm_fopen(path, "wb");
+    if (!f) {
+        return false;
+    }
+    size_t written = fwrite(content, 1, strlen(content), f);
+    fclose(f);
+    return written == strlen(content);
+}
+
 TEST(dx_verify_resolves_its_subject_in_the_session_project) {
     /* The verify request resolves its subject through the base's own snippet
      * lookup, so it needs a project exactly as much as a base tool does. It
@@ -25075,13 +25087,17 @@ TEST(dx_verify_resolves_its_subject_in_the_session_project) {
     ASSERT_NOT_NULL(store);
     ASSERT_EQ(cbm_store_upsert_project(store, project, cbm_tmpdir()), CBM_STORE_OK);
     cbm_mcp_server_set_project(srv, project);
+    /* The snippet lookup reads the file, so the fixture needs one. */
+    char file_path[512];
+    snprintf(file_path, sizeof(file_path), "%s/target.c", cbm_tmpdir());
+    ASSERT_TRUE(dx_test_write_file(file_path, "int target_fn(void) {\n  return 0;\n}\n"));
     cbm_node_t node = {.project = project,
                         .label = "Function",
                         .name = "target_fn",
                         .qualified_name = "pkg.target_fn",
-                        .file_path = "src/target.c",
-                        .start_line = 10,
-                        .end_line = 20};
+                        .file_path = "target.c",
+                        .start_line = 1,
+                        .end_line = 3};
     ASSERT_GT(cbm_store_upsert_node(store, &node), 0);
 
     /* No project in the request: the session's project is the one that must
@@ -25120,6 +25136,12 @@ TEST(dx_verify_reports_unverifiable_for_a_subject_the_graph_does_not_have) {
     ASSERT_NOT_NULL(store);
     ASSERT_EQ(cbm_store_upsert_project(store, project, cbm_tmpdir()), CBM_STORE_OK);
     cbm_mcp_server_set_project(srv, project);
+    /* A file for the lookup to read: the subject is absent from the GRAPH, not
+     * from the disk. A subject that cannot be looked up is a failed lookup,
+     * not an unverifiable claim, and the two must not be confused. */
+    char file_path[512];
+    snprintf(file_path, sizeof(file_path), "%s/target.c", cbm_tmpdir());
+    ASSERT_TRUE(dx_test_write_file(file_path, "int target_fn(void) {\n  return 0;\n}\n"));
 
     char *result = cbm_mcp_handle_tool(
         srv, "dx_codebase",
@@ -25177,6 +25199,35 @@ TEST(dx_the_instructions_describe_each_type_the_way_the_contract_does) {
     yyjson_doc_free(doc);
     free(resp);
     cbm_mcp_server_free(srv);
+    PASS();
+}
+
+TEST(dx_the_specification_table_and_the_code_agree) {
+    /* The specification's table and the module's table carry the same purpose
+     * strings, and this is the check that keeps the document and the product
+     * from drifting apart. The document is what a person reads to learn the
+     * surface, so a document that describes a different surface than the code
+     * ships is worse than no document.
+     *
+     * The runner may be started from another directory, in which case the
+     * document is not where this expects it. The check is worth having when it
+     * can run and is not worth failing the suite over when it cannot. */
+    FILE *doc_file = fopen("dx/F1-SURFACE.md", "rb");
+    if (!doc_file) {
+        PASS();
+    }
+    char text[65536];
+    size_t read = fread(text, 1, sizeof(text) - 1, doc_file);
+    fclose(doc_file);
+    text[read] = '\0';
+
+    for (int i = 0; i < DX_REQ_TYPE_COUNT; i++) {
+        const char *name = dx_surface_type_name((dx_request_type_t)i);
+        const char *purpose = dx_surface_type_purpose((dx_request_type_t)i);
+        char needle[320];
+        snprintf(needle, sizeof(needle), "| `%s` | %s |", name, purpose);
+        ASSERT_TRUE(strstr(text, needle) != NULL);
+    }
     PASS();
 }
 
@@ -25688,6 +25739,7 @@ SUITE(mcp) {
     RUN_TEST(dx_profile_advertises_exactly_one_tool);
     RUN_TEST(dx_verify_resolves_its_subject_in_the_session_project);
     RUN_TEST(dx_verify_reports_unverifiable_for_a_subject_the_graph_does_not_have);
+    RUN_TEST(dx_the_specification_table_and_the_code_agree);
     RUN_TEST(dx_the_instructions_describe_each_type_the_way_the_contract_does);
     RUN_TEST(dx_the_required_fields_match_the_base_tools_own_schemas);
     RUN_TEST(dx_the_schema_names_the_same_required_fields_as_the_layer);

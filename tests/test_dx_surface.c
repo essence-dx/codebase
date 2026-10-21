@@ -1078,6 +1078,106 @@ TEST(dx_two_types_never_say_the_same_thing) {
     PASS();
 }
 
+TEST(dx_an_explicit_source_mode_is_not_duplicated_in_the_forwarded_arguments) {
+    /* A caller who sets the base's own source_mode keeps their value - the
+     * same rule as max_output_tokens. And the layer must not ALSO write its
+     * default: the forwarded arguments would carry the key twice, and a JSON
+     * object with one key twice is ambiguous, so the base might read the
+     * caller's value or the layer's depending on which it happens to take
+     * first. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"details\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"details\",\"qualified_name\":\"a.b\",\"source_mode\":\"full\"}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), 0);
+
+    int occurrences = 0;
+    const char *at = req.args_json;
+    while ((at = strstr(at, "\"source_mode\"")) != NULL) {
+        occurrences++;
+        at++;
+    }
+    ASSERT_EQ(occurrences, 1);
+    ASSERT_TRUE(strstr(req.args_json, "\"source_mode\":\"full\"") != NULL);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_the_source_policy_default_is_written_when_the_caller_set_none) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"details\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"details\",\"qualified_name\":\"a.b\"}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), 0);
+
+    int occurrences = 0;
+    const char *at = req.args_json;
+    while ((at = strstr(at, "\"source_mode\"")) != NULL) {
+        occurrences++;
+        at++;
+    }
+    ASSERT_EQ(occurrences, 1);
+    ASSERT_TRUE(strstr(req.args_json, "\"source_mode\":\"outline\"") != NULL);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_an_unknown_envelope_field_is_refused_not_ignored) {
+    /* The schema says additionalProperties false for the envelope, and this
+     * makes that true. A silently ignored field is the same defect as the
+     * `source: "full"` no-op: the caller is told nothing, and a typo is
+     * answered as if it were right. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\"},\"extra\":true}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), -1);
+    ASSERT_NOT_NULL(err);
+    ASSERT_TRUE(strstr(err, "extra") != NULL);
+    free(err);
+    PASS();
+}
+
+TEST(dx_a_typo_in_a_field_name_is_refused_rather_than_ignored) {
+    /* The one a caller would actually make. Silently ignoring "requets"
+     * would answer the question with no request at all, and say nothing. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"requets\":{\"type\":\"search\",\"query\":\"foo\"}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), -1);
+    ASSERT_NOT_NULL(err);
+    ASSERT_TRUE(strstr(err, "requets") != NULL);
+    free(err);
+    PASS();
+}
+
+TEST(dx_an_unknown_draft_field_is_refused_not_ignored) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\",\"confidence\":0.9},"
+        "\"review\":\"v\",\"request\":{\"type\":\"search\",\"query\":\"foo\"}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), -1);
+    ASSERT_NOT_NULL(err);
+    ASSERT_TRUE(strstr(err, "confidence") != NULL);
+    free(err);
+    PASS();
+}
+
+TEST(dx_the_four_envelope_fields_are_still_accepted) {
+    /* The refusal must not cost the ordinary case anything. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    ASSERT_EQ(dx_surface_parse(DX_VALID, &req, &err), 0);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
 TEST(dx_the_schema_documents_the_answer_policy) {
     const char *schema = dx_surface_tool_schema();
     yyjson_doc *doc = yyjson_read(schema, strlen(schema), 0);
@@ -1159,5 +1259,11 @@ SUITE(dx_surface) {
     RUN_TEST(dx_the_audit_does_not_claim_the_review_said_something_it_did_not);
     RUN_TEST(dx_every_request_type_says_what_it_answers);
     RUN_TEST(dx_two_types_never_say_the_same_thing);
+    RUN_TEST(dx_an_explicit_source_mode_is_not_duplicated_in_the_forwarded_arguments);
+    RUN_TEST(dx_the_source_policy_default_is_written_when_the_caller_set_none);
+    RUN_TEST(dx_an_unknown_envelope_field_is_refused_not_ignored);
+    RUN_TEST(dx_a_typo_in_a_field_name_is_refused_rather_than_ignored);
+    RUN_TEST(dx_an_unknown_draft_field_is_refused_not_ignored);
+    RUN_TEST(dx_the_four_envelope_fields_are_still_accepted);
     RUN_TEST(dx_the_schema_documents_the_answer_policy);
 }

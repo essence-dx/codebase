@@ -21014,6 +21014,62 @@ static char *dx_gov_args(const char *const *keys, const char *const *values, int
     return out;
 }
 
+/* Did the base refuse or fail? An error result is not the same thing as
+ * "not found", and the two have to be told apart. */
+static bool dx_gov_result_is_error(const char *json) {
+    if (!json) {
+        return false;
+    }
+    yyjson_doc *doc = yyjson_read(json, strlen(json), 0);
+    if (!doc) {
+        return false;
+    }
+    bool is_error = false;
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    if (yyjson_is_obj(root)) {
+        yyjson_val *flag = yyjson_obj_get(root, "isError");
+        if (yyjson_is_true(flag)) {
+            is_error = true;
+        } else {
+            yyjson_val *sc = yyjson_obj_get(root, "structuredContent");
+            if (yyjson_is_obj(sc) && yyjson_obj_get(sc, "error")) {
+                is_error = true;
+            }
+        }
+    }
+    yyjson_doc_free(doc);
+    return is_error;
+}
+
+/* Did the snippet lookup fail, as opposed to finding nothing?
+ *
+ * The base's snippet lookup reports BOTH "no such symbol" and every other
+ * failure - a project that is not indexed, a file that cannot be read - as an
+ * ERROR result. They are not the same answer. "The graph does not contain
+ * this symbol" is a verdict, and "I could not look it up" is a failure to
+ * look, and conflating them lets the tool answer "unverifiable" when the
+ * truth is "I did not ask".
+ *
+ * The base's result shape carries no other signal, so the distinction is made
+ * on its message - which is the base's own contract, and is checked exactly
+ * rather than by a loose "not found" substring that would also match
+ * "project not found". */
+static bool dx_gov_snippet_lookup_failed(const char *json) {
+    if (!dx_gov_result_is_error(json)) {
+        return false;
+    }
+    char *err = dx_gov_str_dup(json, "error");
+    if (!err) {
+        return true; /* an error with no message: the lookup did not answer */
+    }
+    /* "symbol not found" is the base's way of saying the graph was asked and
+     * does not have it. Everything else - "project not found", "project not
+     * indexed", a file that cannot be read - is a failed lookup. */
+    bool failed = strncmp(err, "symbol not found", 17) != 0;
+    free(err);
+    return failed;
+}
+
 /* verify: does the graph back this claim?
  *
  * The subject is resolved through the base's own snippet lookup in outline
@@ -21044,6 +21100,24 @@ static char *handle_dx_verify(cbm_mcp_server_t *srv, const char *args_json) {
 
     char *snippet = handle_get_code_snippet(srv, snippet_args);
     free(snippet_args);
+
+    /* A lookup that FAILED is not a verdict. The contract reserves
+     * "unverifiable" for "the graph was asked and does not know"; answering
+     * that when the truth is "the project was not indexed" would be the tool
+     * failing to ask the right question and then reporting a confident
+     * answer about it. */
+    if (dx_gov_snippet_lookup_failed(snippet)) {
+        char *why = dx_gov_str_dup(snippet, "error");
+        char message[512];
+        snprintf(message, sizeof(message),
+                 "dx_codebase: the subject could not be looked up, so there is no verdict: %s",
+                 why && why[0] ? why : "the lookup failed");
+        free(why);
+        free(snippet);
+        free(claim);
+        char *failure = cbm_mcp_text_result(message, true);
+        return failure;
+    }
 
     bool resolved = false;
     char *citation = NULL;
