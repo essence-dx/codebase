@@ -468,9 +468,42 @@ slug is redundant" - is about the repository slug, and the slug is
 `essence-dx/codebase`; the *binary* is `dx-codebase`, and that is what the
 registry and the installer use.
 
-**Done when.** The release publishes `dx-codebase-<target-triple>[.exe]` and
-the registry carries `("codebase", "essence-dx/codebase", "dx-codebase",
-"bin/dx-codebase")`.
+**Status 2026-10-21 - DONE, except the one decision that is not mine.**
+Three chains, each self-consistent, and the checker says so:
+
+| Chain | The name | Where it ends |
+| --- | --- | --- |
+| The published asset | `dx-codebase-<os>-<arch>` | the archive the hub's installer downloads |
+| The archive member | `dx-codebase` | the executable inside that archive |
+| The installed name | `codebase-memory-mcp` | the name the product is installed under, and the key its own CLI writes into the user's MCP config |
+
+The third chain is the product's identity, in 344 places in `src/`, and it is
+**not** the hub's to change. So the fork ships the hub's names for the two
+things the hub names, and keeps its own for the one thing the hub does not.
+
+**The fork now publishes nothing under upstream's names.** The npm, PyPI and
+MCP Registry publish steps, the legacy-alias publisher, and the homebrew
+installation test are each behind `if: false` with the reason in the file. A
+fork that publishes to `codebase-memory-mcp` on npm is not a fork, it is a
+typosquat. The registry name for the fork is **still open** - it is the one
+decision in this item, and it is a decision, not a mechanical change.
+
+**Verified.** A checker walks all three chains and asserts each agrees end to
+end and that none has crossed: **70 coupled names, all agreeing**. The three
+changed workflows parse as YAML, the eight changed shell scripts pass
+`bash -n`, the four changed Python scripts compile, `server.json` parses as
+JSON, and `install.ps1` parses as PowerShell.
+
+**Not verified here.** `scripts/smoke-test.sh`, which needs a Linux or macOS
+host with a toolchain, and the release pipeline itself, which needs GitHub
+Actions. The base commit cannot build on this toolchain, so the pipeline's
+own gates are unverified on this machine.
+
+**Done when.** The release publishes `dx-codebase-<target-triple>[.exe]`, the
+archives carry `dx-codebase`, the selection and extraction agree, the
+registry carries `("codebase", "essence-dx/codebase", "dx-codebase",
+"bin/dx-codebase")`, and **nothing in the pipeline publishes under upstream's
+package names**.
 
 ### CB-16 - Decide what happens to CBM Lens in a DX product
 
