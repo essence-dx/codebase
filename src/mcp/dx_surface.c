@@ -729,31 +729,51 @@ const char *dx_surface_escape_text(void) {
 /* ------------------------------------------------------------------- audit */
 
 char *dx_surface_audit_text(const dx_surface_request_t *req, const char *checked) {
-  /* The escape answer is not a graph answer, and the audit must not claim
-   * it is. The generic wording says "the graph is the only source
-   * consulted" - which for an escape is FALSE: no graph was consulted at
-   * all, because the question was not about the code. An audit line that
-   * certifies something the server cannot back is the one thing this
-   * surface must never emit, and the escape answer was emitting one.
-   *
-   * The other half of it was not English: "Answered from no graph query
-   * was needed" is a sentence that does not parse. */
-  if (req->request_type == DX_REQ_ESCAPE) {
-    return dx_msg("No graph query was needed: the committed request type was 'escape', so the "
-                  "graph was not consulted at all. The answer is the bail-out text, and it is "
-                  "not a fact about the code.");
-  }
     if (!req) {
         return NULL;
     }
     const char *committed = dx_surface_type_name(req->request_type);
     const char *drafted = dx_surface_type_name(req->draft_type);
-    const char *source = checked && checked[0] ? checked : "the indexed graph";
+
+    /* What was actually consulted is NOT the same for every type, and the
+     * audit line has to say which one it was.
+     *
+     * The escape answer consulted nothing. The certificate is answered from
+     * the paths and the boundaries the CALLER supplied, and the enforce gate
+     * from the findings and the baseline the CALLER supplied - in both cases
+     * the graph is never consulted at all. Only the graph-answering types
+     * - and verify, which resolves its subject through the graph - have the
+     * graph as their source.
+     *
+     * So the generic wording "the graph is the only source consulted" was
+     * false for three of the five request types, and an audit line that
+     * certifies something that did not happen is the one thing this surface
+     * must never emit. */
+    const char *source;
+    const char *consulted;
+    switch (req->request_type) {
+    case DX_REQ_ESCAPE:
+        return dx_msg("No graph query was needed: the committed request type was 'escape', so the "
+                      "graph was not consulted at all. The answer is the bail-out text, and it is "
+                      "not a fact about the code.");
+    case DX_REQ_CERTIFICATE:
+        source = "the paths and the boundaries the caller supplied";
+        consulted = "the caller's paths and boundaries are the only source consulted";
+        break;
+    case DX_REQ_ENFORCE:
+        source = "the findings and the baseline the caller supplied";
+        consulted = "the caller's findings and baseline are the only source consulted";
+        break;
+    default:
+        source = checked && checked[0] ? checked : "the indexed graph";
+        consulted = "the graph is the only source consulted";
+        break;
+    }
+
     if (strcmp(drafted, committed) == 0) {
         return dx_msg("Answered from %s. The committed request type was '%s', which the draft also "
-                      "proposed. The graph is the only source consulted; where it does not know, "
-                      "the answer says so.",
-                      source, committed);
+                      "proposed. %s; where it does not know, the answer says so.",
+                      source, committed, consulted);
     }
     /* The audit states what it can back. The review is free text: the layer
      * cannot read "actually use search instead" and turn it into a type, so
@@ -762,9 +782,9 @@ char *dx_surface_audit_text(const dx_surface_request_t *req, const char *checked
      * content that the server cannot make - and a reader would take the
      * committed type as the review's own words. */
     return dx_msg("Answered from %s. The draft proposed '%s'; the committed request type is '%s', "
-                  "and the committed type is the one that was answered. The graph is the only "
-                  "source consulted; where it does not know, the answer says so.",
-                  source, drafted, committed);
+                  "and the committed type is the one that was answered. %s; where it does not know, "
+                  "the answer says so.",
+                  source, drafted, committed, consulted);
 }
 
 /* --------------------------------------------------------------- budget */

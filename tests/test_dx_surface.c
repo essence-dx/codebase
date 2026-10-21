@@ -1295,6 +1295,65 @@ TEST(dx_an_answer_over_the_budget_is_still_refused) {
     PASS();
 }
 
+TEST(dx_the_audit_says_the_graph_was_not_consulted_for_the_certificate) {
+    /* The certificate is answered from the paths and the boundaries the
+     * CALLER supplied. The graph is never consulted, so an audit line that
+     * says "the graph is the only source consulted" certifies something that
+     * did not happen. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"certificate\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"certificate\",\"before\":[],\"after\":[],\"boundaries\":[]}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), 0);
+    ASSERT_EQ(req.request_type, DX_REQ_CERTIFICATE);
+
+    char *audit = dx_surface_audit_text(&req, "the indexed graph");
+    ASSERT_NOT_NULL(audit);
+    ASSERT_NULL(strstr(audit, "the graph is the only source consulted"));
+    ASSERT_TRUE(strstr(audit, "the caller's paths and boundaries") != NULL);
+    free(audit);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_the_audit_says_the_graph_was_not_consulted_for_the_gate) {
+    /* The enforce gate is answered from the findings and the baseline the
+     * CALLER supplied. Same rule. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"enforce\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"enforce\",\"findings\":[],\"baseline\":[]}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), 0);
+    ASSERT_EQ(req.request_type, DX_REQ_ENFORCE);
+
+    char *audit = dx_surface_audit_text(&req, "the indexed graph");
+    ASSERT_NOT_NULL(audit);
+    ASSERT_NULL(strstr(audit, "the graph is the only source consulted"));
+    ASSERT_TRUE(strstr(audit, "the caller's findings and baseline") != NULL);
+    free(audit);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_the_audit_still_says_the_graph_was_consulted_for_a_graph_answer) {
+    /* And the other half must not be lost: a real graph answer DOES say the
+     * graph was the only source consulted. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"verify\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"verify\",\"claim\":\"c\",\"subject\":\"a.b\"}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), 0);
+    char *audit = dx_surface_audit_text(&req, "the indexed graph");
+    ASSERT_NOT_NULL(audit);
+    ASSERT_TRUE(strstr(audit, "the graph is the only source consulted") != NULL);
+    free(audit);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
 SUITE(dx_surface) {
     RUN_TEST(dx_envelope_with_all_four_fields_parses);
     RUN_TEST(dx_missing_question_is_rejected);
@@ -1360,6 +1419,9 @@ SUITE(dx_surface) {
     RUN_TEST(dx_the_escape_audit_does_not_claim_the_graph_was_consulted);
     RUN_TEST(dx_the_graph_audit_still_claims_the_graph_was_consulted);
     RUN_TEST(dx_the_schema_documents_the_answer_policy);
+    RUN_TEST(dx_the_audit_says_the_graph_was_not_consulted_for_the_certificate);
+    RUN_TEST(dx_the_audit_says_the_graph_was_not_consulted_for_the_gate);
+    RUN_TEST(dx_the_audit_still_says_the_graph_was_consulted_for_a_graph_answer);
     RUN_TEST(dx_the_budget_never_replaces_a_failure_with_a_size_complaint);
     RUN_TEST(dx_an_answer_over_the_budget_is_still_refused);
 }
