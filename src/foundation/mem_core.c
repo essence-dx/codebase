@@ -36,7 +36,32 @@ static void check_owned(const void *block, const char *op);
 #define CBM_USABLE_SIZE(p) malloc_size(p)
 #elif defined(_WIN32)
 #include <malloc.h> /* _msize */
-#define CBM_USABLE_SIZE(p) _msize((void *)(p))
+#include <mimalloc.h>
+/* On Windows a block can have come from mimalloc even though the caller
+ * asked for "malloc": the test build's --wrap allocator routes malloc to
+ * mi_malloc, and the product build binds the tree-sitter runtime to mimalloc
+ * as well. msvcrt's _msize is only defined for a pointer that came from
+ * msvcrt's OWN malloc - asking it about a mimalloc block reads mimalloc's
+ * metadata as if it were the CRT's header, and the CRT's heap accounting
+ * goes with it: the process dies with STATUS_HEAP_CORRUPTION.
+ *
+ * It cannot be fixed by the linker. On 64-bit Windows the call is an
+ * indirect call through the import thunk, so the object references
+ * __imp__msize, not _msize - and --wrap=_msize redirects the symbol, not
+ * the thunk. nm on the object shows:
+ *
+ *     U __imp__msize
+ *
+ * so the wrapper the build defines is never reached.
+ *
+ * Only the allocator that made a block can answer its size, so ask mimalloc
+ * when the block is one of its. The check is a range test over mimalloc's own
+ * region list: safe for a CRT pointer, and false before mimalloc has
+ * initialised - when there are no mimalloc blocks anyway and _msize is the
+ * right answer. */
+#define CBM_USABLE_SIZE(p)                                                    \
+    (mi_is_in_heap_region((void *)(p)) ? mi_usable_size((void *)(p))         \
+                                       : _msize((void *)(p)))
 #elif defined(__GLIBC__) || defined(__linux__)
 #include <malloc.h> /* malloc_usable_size */
 #define CBM_USABLE_SIZE(p) malloc_usable_size((void *)(p))
