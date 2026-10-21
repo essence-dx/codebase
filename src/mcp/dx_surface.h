@@ -43,6 +43,12 @@ typedef enum {
     DX_REQ_COVERAGE,
     DX_REQ_CHANGES,
     DX_REQ_ESCAPE,
+    /* The governance requests. These are DX features, not base tools, so they
+     * have no entry in the base-tool table; the server handles them itself
+     * and the verdict policy lives in dx_governance.c. */
+    DX_REQ_VERIFY,
+    DX_REQ_CERTIFICATE,
+    DX_REQ_ENFORCE,
     DX_REQ_TYPE_COUNT
 } dx_request_type_t;
 
@@ -98,8 +104,14 @@ const char *dx_surface_tool_schema(void);
 const char *dx_surface_type_name(dx_request_type_t type);
 bool dx_surface_type_from_name(const char *name, dx_request_type_t *out);
 
-/* The base tool a request type dispatches to, or NULL for escape. */
+/* The base tool a request type dispatches to, or NULL for escape and for the
+ * governance requests, which the server handles itself. */
 const char *dx_surface_base_tool(dx_request_type_t type);
+
+/* Is this one of the governance requests? They are answered by the DX layer
+ * rather than by a base tool, and they are the only types whose answer is a
+ * verdict about a claim rather than a fact about the code. */
+bool dx_surface_type_is_governance(dx_request_type_t type);
 
 /* Parse and validate an envelope.
  *

@@ -19,6 +19,75 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `feat:` the governance verdicts - the tool can refute, not just answer
+
+**Milestone M3.** A retrieval tool informs. This one **refutes**. Three of the
+four verdicts are now reachable through the single DX tool.
+
+**What was built (DX).**
+
+| File | What it is |
+| --- | --- |
+| `src/mcp/dx_governance.h` | The four verdicts and their contracts. |
+| `src/mcp/dx_governance.c` | The verdict **policy**. Depends on yyjson alone - no store, no tree-sitter, no SQLite - so every verdict is verifiable without a graph. |
+| `tests/test_dx_governance.c` | 23 contract tests. |
+| `src/mcp/mcp.c` | The handlers, and the three request types the surface routes to them. |
+| `src/mcp/dx_surface.c` | The new request types: `verify`, `certificate`, `enforce`. |
+
+**The rule the whole module follows: never certify what cannot be checked.**
+
+| Request | Answers |
+| --- | --- |
+| `verify` | `confirmed` / `refuted` / `unverifiable`, with a citation receipt. The subject is resolved through the base's own snippet lookup in **outline** mode - a verdict needs a location, not the code. |
+| `certificate` | `clean` / `opened`: did this change **open a new path** into a declared boundary? Reachable after, not before, and inside the boundary. |
+| `enforce` | The commit gate: `held` or not, with blocking, new-frozen, accepted-frozen, advisory and off findings separated. |
+| `certify_public_surface` | **Policy done, not wired.** The graph side needs the diff's changed exports and their consumers. |
+
+**The three decisions that carry the weight.**
+
+1. **An unresolved subject is "unverifiable", not "refuted".** The graph not
+   knowing is not evidence that a claim is false. A resolved subject with no
+   located evidence is also unverifiable - the base's own agent instructions
+   say to treat an unknown as unresolved, never as an all-clear.
+2. **A path that was already reachable is not an opening.** The certificate is
+   differential. A path that merely moved is not a new path, and a boundary
+   prefix matches on a **segment**, so `/src/api` covers `/src/api/x.c` and
+   not `/src/apix.c`.
+3. **A frozen kind the baseline already accepts is adopted debt, not a
+   failure.** That is the difference between freezing a rule and failing a
+   build. And an unrecognised action is **advisory, never blocking**: an
+   unknown policy must not fail a build.
+
+**Nothing is called safe on a shrug.** An export whose compatibility is missing
+or unrecognised is `potentially-breaking`, and a breaking export with no known
+consumer is still reported as breaking - the absence of a known consumer is not
+evidence that there is none.
+
+**Executed.**
+
+| Check | Result |
+| --- | --- |
+| `dx_governance.c` compiles clean under the project flags | exit 0 |
+| The governance contract tests pass | **23 passed, exit 0** |
+| `dx_surface.c` compiles clean and its contract tests pass | exit 0, **34 passed** |
+| `mcp.c` and `dx_governance.c` pass `-fsyntax-only` with the project include set | exit 0 |
+| The full server build | **NOT RUN** - the tree-sitter runtime and the 162 vendored grammars are not built in this environment |
+
+**Two real bugs the tests caught, and one that was not a bug.**
+
+- The first cut of the module used `yyjson_obj_foreach` on **arrays**. The
+  macro walks an object's members, so every array came back empty. Twelve
+  tests failed. Worse, two tests *passed* for the wrong reason - they expected
+  a clean result and got one from an empty iteration. A green suite is not
+  proof; the array cases are now the ones that would have caught it.
+- A boundary-prefix case failed because the **test** was wrong, not the code:
+  it added a *new* path inside the boundary and expected "clean", when a new
+  path inside a boundary is exactly an opening. The test was split into two -
+  the "nothing new" case and the "only the new path counts" case.
+- A naming trap worth recording: `yyjson_arr_foreach` is for arrays and
+  `yyjson_obj_foreach` is for objects. The compiler does not catch the
+  mistake, because both are macros and both compile.
+
 ### 2026-10-21 - `feat:` the answer policy - relationships by default, and a budget that gates
 
 **Milestone M2, landed inside M1.** The shape of the answer is decided at the

@@ -221,9 +221,9 @@ clearest evidence behind it.
 
 | Milestone | Feature | State |
 | --- | --- | --- |
-| M1 | F1 - the surface | **Landed 2026-10-21.** The contract module and its 33 tests are in `src/mcp/dx_surface.c` and `tests/test_dx_surface.c`; the tool, the `dx` profile and the dispatch are wired into `src/mcp/mcp.c`. The full server build has not been run in this environment - see `CHANGELOG.md`. |
+| M1 | F1 - the surface | **Landed 2026-10-21.** The contract module and its 34 tests are in `src/mcp/dx_surface.c` and `tests/test_dx_surface.c`; the tool, the `dx` profile and the dispatch are wired into `src/mcp/mcp.c`. The full server build has not been run in this environment - see `CHANGELOG.md`. |
 | M2 | F2 - index, not bodies, under a hard budget | **Landed 2026-10-21, inside M1.** The answer policy (`source`, `max_tokens`), the gate, and the `shape` report are part of the surface, because the shape of the answer is decided at the surface. |
-| M3 | F4 - governance verdicts | Not started |
+| M3 | F4 - governance verdicts | **Landed 2026-10-21, mostly.** The verdict policy is complete in `src/mcp/dx_governance.c` with 23 contract tests, and three of the four verdicts - `verify`, `certificate`, `enforce` - are reachable through the surface. `certify_public_surface` is implemented as policy but not yet wired: its graph side needs the diff's changed exports and their consumers. That is the one open piece of `CB-10`. |
 | M4 | F3 - the org graph | Not started |
 | M5 | F5 - stale memory + prove | Not started |
 

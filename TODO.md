@@ -263,6 +263,19 @@ rules expressed as machine checks. `AGENTS.md` section 2 rule 1 - never absorb
 a child repo - becomes a check that refuses a diff opening a path across a
 declared boundary.
 
+**Status 2026-10-21.** The **policy** is done and tested:
+`src/mcp/dx_governance.c` implements all four verdicts with 23 contract tests,
+and the module depends on yyjson alone, so every verdict is verifiable without
+a store. Three of the four are now wired through the DX surface as request
+types - `verify` (graph-backed, through the base's own snippet lookup),
+`certificate` and `enforce` - and the surface grew from 34 to 34 tests with
+the new types covered.
+
+**Not yet done.** `certify_public_surface` - the per-export breaking-change
+verdict - is implemented and tested as policy but **not wired**: the graph side
+needs the diff's changed exports and their consumers, which is the next slice.
+It is the one remaining piece of this item.
+
 **Done when.** A diff that introduces a path dependency across a declared
 boundary is refused by the gate with the offending edge named, and the refusal
 reproduces from the same tree state.

@@ -38,6 +38,25 @@ Name: `dx_codebase`
 | `coverage` | is this scope indexed and fresh | `check_index_coverage` |
 | `changes` | what a diff reaches | `detect_changes` |
 | `escape` | **not a graph question** | none - returns a clean bail-out |
+| `verify` | does the graph back this claim | none - answered by the DX layer |
+| `certificate` | did this change open a new path into a declared boundary | none - answered by the DX layer |
+| `enforce` | the commit gate | none - answered by the DX layer |
+
+**The governance requests** are not base tools. They turn graph facts into
+verdicts, and the verdict policy lives in `src/mcp/dx_governance.c` - separate
+from the graph access, so the verdicts are testable without a store. The rule
+the whole module follows: **never certify what cannot be checked.**
+
+| Request | Fields | Answers |
+| --- | --- | --- |
+| `verify` | `claim`, `subject` | `confirmed` / `refuted` / `unverifiable`, with a citation receipt. The subject is resolved through the base's own snippet lookup in outline mode - a verdict needs a location, not the code. A subject the graph does not have is **unverifiable, never refuted**: the graph not knowing is not evidence the claim is false. |
+| `certificate` | `before`, `after` (path arrays), `boundaries` | `clean` / `opened`, with the opened paths named. The question is **differential**: reachable after, not before, and inside a declared boundary. A path that merely moved is not an opening. |
+| `enforce` | `findings`, `baseline` | `held` or not, with the blocking, new-frozen, accepted-frozen, advisory and off findings separated. A frozen kind the baseline already accepts is **adopted debt, not a failure** - that is the difference between freezing a rule and failing a build. An unrecognised action is advisory, never blocking: an unknown policy must not fail a build. |
+
+`certify_public_surface` - the per-export breaking-change verdict - is **not yet
+wired**. Its policy is implemented and tested in `dx_governance.c`; the graph
+side needs the diff's changed exports and their consumers, which is the next
+slice. It is recorded in `TODO.md` as `CB-10`.
 
 **The answer policy** (two optional request fields, and the DX surface's own):
 

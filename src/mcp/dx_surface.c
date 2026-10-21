@@ -18,7 +18,8 @@
 
 /* The dispatch table. One row per request type: the schema discriminator and
  * the base tool it forwards to. "trace" and "impact" share trace_path - the
- * impact direction is one of that tool's own parameters, not a second tool. */
+ * impact direction is one of that tool's own parameters, not a second tool.
+ * The governance rows have no base tool: they are answered by the DX layer. */
 typedef struct {
     const char *name;
     const char *base_tool;
@@ -35,6 +36,9 @@ static const dx_type_def_t DX_TYPES[DX_REQ_TYPE_COUNT] = {
     {"coverage", "check_index_coverage"},
     {"changes", "detect_changes"},
     {"escape", NULL},
+    {"verify", NULL},
+    {"certificate", NULL},
+    {"enforce", NULL},
 };
 
 const char *dx_surface_type_name(dx_request_type_t type) {
@@ -66,6 +70,10 @@ const char *dx_surface_base_tool(dx_request_type_t type) {
     return DX_TYPES[type].base_tool;
 }
 
+bool dx_surface_type_is_governance(dx_request_type_t type) {
+    return type == DX_REQ_VERIFY || type == DX_REQ_CERTIFICATE || type == DX_REQ_ENFORCE;
+}
+
 /* ----------------------------------------------------------------- schema */
 
 /* The advertised schema. The "type" enum is checked against DX_TYPES by
@@ -82,7 +90,8 @@ static const char *DX_TOOL_SCHEMA =
     "\"reason\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Why this request type looks "
     "like the smallest answer.\"},"
     "\"type\":{\"type\":\"string\",\"enum\":[\"search\",\"trace\",\"impact\",\"details\",\"outline\","
-    "\"architecture\",\"schema\",\"coverage\",\"changes\",\"escape\"],\"description\":\"The request "
+    "\"architecture\",\"schema\",\"coverage\",\"changes\",\"escape\",\"verify\",\"certificate\","
+    "\"enforce\"],\"description\":\"The request "
     "type being considered.\"}},"
     "\"description\":\"The drafted plan: a request type, plus the reason it looks smallest.\"},"
     "\"review\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Self-correct the draft. If the "
@@ -90,7 +99,8 @@ static const char *DX_TOOL_SCHEMA =
     "\"request\":{\"type\":\"object\",\"required\":[\"type\"],\"additionalProperties\":true,"
     "\"properties\":{"
     "\"type\":{\"type\":\"string\",\"enum\":[\"search\",\"trace\",\"impact\",\"details\",\"outline\","
-    "\"architecture\",\"schema\",\"coverage\",\"changes\",\"escape\"],\"description\":\"The committed "
+    "\"architecture\",\"schema\",\"coverage\",\"changes\",\"escape\",\"verify\",\"certificate\","
+    "\"enforce\"],\"description\":\"The committed "
     "request type. The other fields are forwarded to the matching base tool unchanged.\"},"
     "\"source\":{\"type\":\"string\",\"enum\":[\"outline\",\"full\"],\"default\":\"outline\","
     "\"description\":\"Whether the answer may carry source bodies. 'outline' - the default - answers "

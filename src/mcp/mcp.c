@@ -9,6 +9,7 @@
 
 #include "foundation/constants.h"
 #include "mcp/dx_surface.h"
+#include "mcp/dx_governance.h"
 
 enum {
     MCP_FIELD_SIZE = 1040,
@@ -20565,6 +20566,11 @@ release_request:
  * because it dispatches through it. */
 static char *handle_dx_codebase(cbm_mcp_server_t *srv, const char *args_json);
 
+/* The DX governance handlers. Defined after the surface, which calls them. */
+static char *handle_dx_verify(cbm_mcp_server_t *srv, const char *args_json);
+static char *handle_dx_certificate(const char *args_json);
+static char *handle_dx_enforce(const char *args_json);
+
 /* The dispatch table itself, with no profile check. The DX surface calls this
  * for the base tool its committed request selects: the DX profile exposes one
  * tool to the agent, and the request-type table is the allowlist for what
@@ -20724,8 +20730,20 @@ static char *handle_dx_codebase(cbm_mcp_server_t *srv, const char *args_json) {
 
     const char *base_tool = req.base_tool;
     if (!base_tool) {
+        /* The governance requests are answered by the DX layer, not by a base
+         * tool: they turn graph facts into verdicts, and the verdict policy
+         * lives in dx_governance.c. */
+        char *verdict = NULL;
+        if (req.request_type == DX_REQ_VERIFY) {
+            verdict = handle_dx_verify(srv, req.args_json);
+        } else if (req.request_type == DX_REQ_CERTIFICATE) {
+            verdict = handle_dx_certificate(req.args_json);
+        } else if (req.request_type == DX_REQ_ENFORCE) {
+            verdict = handle_dx_enforce(req.args_json);
+        }
         dx_surface_request_free(&req);
-        return cbm_mcp_text_result("dx_codebase: no tool to dispatch to", true);
+        return verdict ? verdict : cbm_mcp_text_result("dx_codebase: no handler for that request",
+                                                        true);
     }
 
     char *inner = dispatch_tool_inner(srv, base_tool, req.args_json);
@@ -20758,6 +20776,229 @@ static char *handle_dx_codebase(cbm_mcp_server_t *srv, const char *args_json) {
     free(shape_json);
     dx_surface_request_free(&req);
     return wrapped ? wrapped : cbm_mcp_text_result("dx_codebase: the result was lost", true);
+}
+
+/* ------------------------------------------------------- DX governance */
+
+/* A string member of a JSON value, as a heap copy, or NULL. The lookup tries
+ * the object itself and then its structuredContent, so it works on both
+ * shapes the base returns: a bare object and a wrapped tool result. */
+static char *dx_gov_str_dup(const char *json, const char *key) {
+    if (!json || !key) {
+        return NULL;
+    }
+    yyjson_doc *doc = yyjson_read(json, strlen(json), 0);
+    if (!doc) {
+        return NULL;
+    }
+    char *out = NULL;
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    if (yyjson_is_obj(root)) {
+        yyjson_val *v = yyjson_obj_get(root, key);
+        if (!yyjson_is_str(v)) {
+            yyjson_val *sc = yyjson_obj_get(root, "structuredContent");
+            v = yyjson_is_obj(sc) ? yyjson_obj_get(sc, key) : NULL;
+        }
+        if (yyjson_is_str(v)) {
+            const char *s = yyjson_get_str(v);
+            if (s) {
+                out = heap_strdup(s);
+            }
+        }
+    }
+    yyjson_doc_free(doc);
+    return out;
+}
+
+/* An integer member of a JSON value, or the fallback. */
+static int dx_gov_int(const char *json, const char *key, int fallback) {
+    if (!json || !key) {
+        return fallback;
+    }
+    yyjson_doc *doc = yyjson_read(json, strlen(json), 0);
+    if (!doc) {
+        return fallback;
+    }
+    int out = fallback;
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    if (yyjson_is_obj(root)) {
+        yyjson_val *v = yyjson_obj_get(root, key);
+        if (!yyjson_is_num(v)) {
+            yyjson_val *sc = yyjson_obj_get(root, "structuredContent");
+            v = yyjson_is_obj(sc) ? yyjson_obj_get(sc, key) : NULL;
+        }
+        if (yyjson_is_num(v)) {
+            out = (int)yyjson_get_num(v);
+        }
+    }
+    yyjson_doc_free(doc);
+    return out;
+}
+
+/* The raw JSON text of a member, as a heap string, or NULL. Used for the
+ * arrays the governance requests carry: the before/after path sets, the
+ * boundaries, the findings and the baseline. */
+static char *dx_gov_member_raw(const char *json, const char *key) {
+    if (!json || !key) {
+        return NULL;
+    }
+    yyjson_doc *doc = yyjson_read(json, strlen(json), 0);
+    if (!doc) {
+        return NULL;
+    }
+    char *out = NULL;
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    if (yyjson_is_obj(root)) {
+        yyjson_val *v = yyjson_obj_get(root, key);
+        if (v) {
+            yyjson_mut_doc *mdoc = yyjson_mut_doc_new(NULL);
+            if (mdoc) {
+                yyjson_mut_val *copy = yyjson_val_mut_copy(mdoc, v);
+                if (copy) {
+                    /* The copy becomes the document root, so writing the
+                     * document writes exactly the member. */
+                    yyjson_mut_doc_set_root(mdoc, copy);
+                    out = yyjson_mut_write(mdoc, 0, NULL);
+                }
+                yyjson_mut_doc_free(mdoc);
+            }
+        }
+    }
+    yyjson_doc_free(doc);
+    return out;
+}
+
+/* Build a JSON object from string members. */
+static char *dx_gov_args(const char *const *keys, const char *const *values, int count) {
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    if (!doc) {
+        return NULL;
+    }
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+    for (int i = 0; i < count; i++) {
+        if (keys[i] && values[i]) {
+            (void)yyjson_mut_obj_add_str(doc, root, keys[i], values[i]);
+        }
+    }
+    char *out = yyjson_mut_write(doc, 0, NULL);
+    yyjson_mut_doc_free(doc);
+    return out;
+}
+
+/* verify: does the graph back this claim?
+ *
+ * The subject is resolved through the base's own snippet lookup in outline
+ * mode - a verdict needs a location, not the code. When the subject is not in
+ * the graph the verdict is "unverifiable", never "refuted": the graph not
+ * knowing is not evidence that the claim is false. */
+static char *handle_dx_verify(cbm_mcp_server_t *srv, const char *args_json) {
+    char *claim = dx_gov_str_dup(args_json, "claim");
+    char *subject = dx_gov_str_dup(args_json, "subject");
+    if (!claim || !claim[0] || !subject || !subject[0]) {
+        free(claim);
+        free(subject);
+        return cbm_mcp_text_result(
+            "dx_codebase: a verify request needs 'claim' and 'subject', both non-empty strings",
+            true);
+    }
+
+    char *project = dx_gov_str_dup(args_json, "project");
+    const char *keys[3] = {"qualified_name", "source_mode", "project"};
+    const char *values[3] = {subject, "outline", project};
+    char *snippet_args = dx_gov_args(keys, values, 3);
+    free(project);
+    free(subject);
+    if (!snippet_args) {
+        free(claim);
+        return cbm_mcp_text_result("dx_codebase: out of memory", true);
+    }
+
+    char *snippet = handle_get_code_snippet(srv, snippet_args);
+    free(snippet_args);
+
+    bool resolved = false;
+    char *citation = NULL;
+    if (snippet) {
+        char *qn = dx_gov_str_dup(snippet, "qualified_name");
+        char *file = dx_gov_str_dup(snippet, "file_path");
+        int line = dx_gov_int(snippet, "start_line", 0);
+        if (qn && qn[0]) {
+            resolved = true;
+            if (file && file[0] && line > 0) {
+                char buf[512];
+                snprintf(buf, sizeof(buf), "%s:%d", file, line);
+                citation = heap_strdup(buf);
+            } else {
+                citation = qn;
+            }
+        }
+        free(qn);
+        free(file);
+        free(snippet);
+    }
+
+    char *verdict = dx_governance_verify_claim(claim, resolved, citation, NULL);
+    free(claim);
+    free(citation);
+    if (!verdict) {
+        return cbm_mcp_text_result("dx_codebase: out of memory", true);
+    }
+    char *result = cbm_mcp_text_result(verdict, false);
+    free(verdict);
+    return result;
+}
+
+/* certificate: did this change OPEN a new path into a declared boundary?
+ *
+ * The caller supplies the paths reachable before and after, and the declared
+ * boundaries. The verdict is differential: reachable after, not before, and
+ * inside the boundary. */
+static char *handle_dx_certificate(const char *args_json) {
+    char *before = dx_gov_member_raw(args_json, "before");
+    char *after = dx_gov_member_raw(args_json, "after");
+    char *boundaries = dx_gov_member_raw(args_json, "boundaries");
+    if (!before || !after) {
+        free(before);
+        free(after);
+        free(boundaries);
+        return cbm_mcp_text_result(
+            "dx_codebase: a certificate request needs 'before' and 'after', each an array of paths",
+            true);
+    }
+    char *cert = dx_governance_certificate(before, after, boundaries ? boundaries : "[]");
+    free(before);
+    free(after);
+    free(boundaries);
+    if (!cert) {
+        return cbm_mcp_text_result("dx_codebase: the certificate could not be built", true);
+    }
+    char *result = cbm_mcp_text_result(cert, false);
+    free(cert);
+    return result;
+}
+
+/* enforce: the gate.
+ *
+ * The findings and the frozen baseline arrive from CI. The gate holds when
+ * nothing is blocking and no NEW frozen kind appears: a frozen kind the
+ * baseline already accepts is adopted debt, not a failure. */
+static char *handle_dx_enforce(const char *args_json) {
+    char *findings = dx_gov_member_raw(args_json, "findings");
+    if (!findings) {
+        return cbm_mcp_text_result(
+            "dx_codebase: an enforce request needs 'findings', an array of finding objects", true);
+    }
+    char *baseline = dx_gov_member_raw(args_json, "baseline");
+    char *gate = dx_governance_enforce(findings, baseline ? baseline : "[]");
+    free(findings);
+    free(baseline);
+    if (!gate) {
+        return cbm_mcp_text_result("dx_codebase: the gate could not be evaluated", true);
+    }
+    char *result = cbm_mcp_text_result(gate, false);
+    free(gate);
+    return result;
 }
 
 char *cbm_mcp_handle_tool(cbm_mcp_server_t *srv, const char *tool_name, const char *args_json) {

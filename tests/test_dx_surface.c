@@ -294,6 +294,9 @@ TEST(dx_every_known_type_maps_to_a_base_tool) {
         {DX_REQ_COVERAGE, "coverage", "check_index_coverage"},
         {DX_REQ_CHANGES, "changes", "detect_changes"},
         {DX_REQ_ESCAPE, "escape", NULL},
+        {DX_REQ_VERIFY, "verify", NULL},
+        {DX_REQ_CERTIFICATE, "certificate", NULL},
+        {DX_REQ_ENFORCE, "enforce", NULL},
     };
     ASSERT_EQ((long long)(sizeof(expected) / sizeof(expected[0])), (long long)DX_REQ_TYPE_COUNT);
     for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); i++) {
@@ -309,6 +312,16 @@ TEST(dx_every_known_type_maps_to_a_base_tool) {
             ASSERT_NULL(tool);
         }
     }
+    PASS();
+}
+
+TEST(dx_the_governance_types_are_recognised) {
+    ASSERT_TRUE(dx_surface_type_is_governance(DX_REQ_VERIFY));
+    ASSERT_TRUE(dx_surface_type_is_governance(DX_REQ_CERTIFICATE));
+    ASSERT_TRUE(dx_surface_type_is_governance(DX_REQ_ENFORCE));
+    ASSERT_FALSE(dx_surface_type_is_governance(DX_REQ_SEARCH));
+    ASSERT_FALSE(dx_surface_type_is_governance(DX_REQ_ESCAPE));
+    ASSERT_FALSE(dx_surface_type_is_governance(DX_REQ_DETAILS));
     PASS();
 }
 
@@ -710,6 +723,7 @@ SUITE(dx_surface) {
     RUN_TEST(dx_project_is_forwarded_verbatim);
     RUN_TEST(dx_include_source_is_not_injected_when_absent);
     RUN_TEST(dx_every_known_type_maps_to_a_base_tool);
+    RUN_TEST(dx_the_governance_types_are_recognised);
     RUN_TEST(dx_unknown_type_name_does_not_parse);
     RUN_TEST(dx_schema_enum_matches_the_dispatch_table);
     RUN_TEST(dx_schema_requires_the_whole_envelope);
