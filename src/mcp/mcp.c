@@ -20741,9 +20741,23 @@ static char *handle_dx_codebase(cbm_mcp_server_t *srv, const char *args_json) {
         } else if (req.request_type == DX_REQ_ENFORCE) {
             verdict = handle_dx_enforce(req.args_json);
         }
+        if (!verdict) {
+            dx_surface_request_free(&req);
+            return cbm_mcp_text_result("dx_codebase: no handler for that request", true);
+        }
+        /* The same contract as every other answer: what was checked, and what
+         * to do next. A verdict that arrives without them is a claim, and
+         * this tool does not make claims. */
+        char *audit = dx_surface_audit_text(&req, "the indexed graph");
+        char *wrapped = dx_surface_wrap_result(verdict, audit, NULL, DX_NEXT_ANSWER,
+                                               "the verdict is final; act on it");
+        free(audit);
         dx_surface_request_free(&req);
-        return verdict ? verdict : cbm_mcp_text_result("dx_codebase: no handler for that request",
-                                                        true);
+        if (wrapped) {
+            free(verdict);
+            return wrapped;
+        }
+        return verdict;
     }
 
     char *inner = dispatch_tool_inner(srv, base_tool, req.args_json);
