@@ -58,10 +58,29 @@ static void check_owned(const void *block, const char *op);
  * when the block is one of its. The check is a range test over mimalloc's own
  * region list: safe for a CRT pointer, and false before mimalloc has
  * initialised - when there are no mimalloc blocks anyway and _msize is the
- * right answer. */
-#define CBM_USABLE_SIZE(p)                                                    \
-    (mi_is_in_heap_region((void *)(p)) ? mi_usable_size((void *)(p))         \
-                                       : _msize((void *)(p)))
+ * right answer.
+ *
+ * The parameter is deliberately NOT const. GCC's -Wmaybe-uninitialized reads
+ * a const-qualified argument as "the callee only reads the pointee", and the
+ * pointee of a malloc'd block is uninitialized by definition - so a const
+ * parameter makes GCC report the query as reading uninitialized memory, and
+ * -Werror turns that into a build failure. A non-const pointer tells GCC the
+ * callee may write, which settles it. Nothing here writes: _msize itself
+ * takes a void * (see <malloc.h>), so the non-const signature is the
+ * truthful one, and the cast at the call site drops the const from a heap
+ * block that is never const.
+ *
+ * Do not "tidy" the signature back to const: the build stops. */
+static __attribute__((noinline)) size_t cbm_win_usable_size(void *block) {
+    if (!block) {
+        return 0;
+    }
+    if (mi_is_in_heap_region(block)) {
+        return mi_usable_size(block);
+    }
+    return _msize(block);
+}
+#define CBM_USABLE_SIZE(p) cbm_win_usable_size((void *)(p))
 #elif defined(__GLIBC__) || defined(__linux__)
 #include <malloc.h> /* malloc_usable_size */
 #define CBM_USABLE_SIZE(p) malloc_usable_size((void *)(p))
@@ -209,7 +228,7 @@ static void class_sub(cbm_mem_class_t cls, size_t bytes, size_t blocks) {
 }
 
 #ifdef CBM_USABLE_SIZE_UNAVAILABLE
-static size_t charge_size(const void *block, size_t requested) {
+static size_t charge_size(void *block, size_t requested) {
     (void)block;
     return requested;
 }
@@ -219,7 +238,7 @@ size_t cbm_mem_usable_size(const void *block) {
     return 0;
 }
 #else
-static size_t charge_size(const void *block, size_t requested) {
+static size_t charge_size(void *block, size_t requested) {
     size_t usable = CBM_USABLE_SIZE(block);
     return usable ? usable : requested;
 }
@@ -469,3 +488,4 @@ void cbm_mem_class_log(const char *tag) {
     }
     cbm_log_info("mem.classes", "tag", tag ? tag : "-", "classes", report);
 }
+
