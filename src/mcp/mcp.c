@@ -1204,14 +1204,41 @@ const char *cbm_mcp_tool_input_schema(const char *tool_name) {
 }
 
 int cbm_mcp_tool_count(void) {
-    return TOOL_COUNT;
+    /* The number of tools the DEFAULT surface advertises - which is what
+     * tools/list hands an agent under the full profile, and what the caller
+     * here (the generated client adapters, which emit one entry per tool and
+     * must not drift from tools/list) needs to iterate.
+     *
+     * The registry holds one more than that: dx_codebase, which the DX
+     * profile alone advertises. The DX surface is a profile, not a tool
+     * bolted onto the upstream menu, so counting it here would make the
+     * adapters emit a tool the default surface never shows. */
+    int count = 0;
+    for (int i = 0; i < TOOL_COUNT; i++) {
+        if (mcp_tool_allowed(CBM_MCP_TOOL_PROFILE_ALL, TOOLS[i].name)) {
+            count++;
+        }
+    }
+    return count;
 }
 
 const char *cbm_mcp_tool_name(int index) {
-    if (index < 0 || index >= TOOL_COUNT) {
+    if (index < 0) {
         return NULL;
     }
-    return TOOLS[index].name;
+    /* Indexed over the ADVERTISED tools, so that index N is the Nth tool
+     * tools/list shows - the same order, the same set. */
+    int seen = 0;
+    for (int i = 0; i < TOOL_COUNT; i++) {
+        if (!mcp_tool_allowed(CBM_MCP_TOOL_PROFILE_ALL, TOOLS[i].name)) {
+            continue;
+        }
+        if (seen == index) {
+            return TOOLS[i].name;
+        }
+        seen++;
+    }
+    return NULL;
 }
 
 const char *cbm_mcp_tool_description(const char *tool_name) {
@@ -1257,8 +1284,21 @@ static size_t help_append(char *out, size_t cap, size_t len, const char *fmt, ..
 }
 
 char *cbm_mcp_tools_help_list(void) {
+    /* The ADVERTISED tools - the same set tools/list hands an agent under the
+     * default profile. The help text and the surface are the same promise in
+     * two places, and the DX tool is advertised by the DX profile alone, so
+     * listing it here would name a tool the default surface never shows. */
+    int total = 0;
+    for (int i = 0; i < TOOL_COUNT; i++) {
+        if (mcp_tool_allowed(CBM_MCP_TOOL_PROFILE_ALL, TOOLS[i].name)) {
+            total++;
+        }
+    }
     size_t cap = SLEN("Tools:") + 2; /* trailing newline + NUL */
     for (int i = 0; i < TOOL_COUNT; i++) {
+        if (!mcp_tool_allowed(CBM_MCP_TOOL_PROFILE_ALL, TOOLS[i].name)) {
+            continue;
+        }
         cap += strlen(TOOLS[i].name) + SLEN(" ,\n "); /* per-tool worst case incl. a wrap */
     }
     char *out = malloc(cap);
@@ -1267,16 +1307,21 @@ char *cbm_mcp_tools_help_list(void) {
     }
     size_t len = help_append(out, cap, 0, "Tools:");
     size_t col = len;
+    int shown = 0;
     for (int i = 0; i < TOOL_COUNT; i++) {
-        const char *sep = (i + 1 < TOOL_COUNT) ? "," : "";
+        if (!mcp_tool_allowed(CBM_MCP_TOOL_PROFILE_ALL, TOOLS[i].name)) {
+            continue;
+        }
+        const char *sep = (shown + 1 < total) ? "," : "";
         size_t item = SLEN(" ") + strlen(TOOLS[i].name) + strlen(sep);
-        if (i > 0 && col + item > MCP_HELP_TOOLS_WRAP_COL) {
+        if (shown > 0 && col + item > MCP_HELP_TOOLS_WRAP_COL) {
             len += help_append(out, cap, len, "\n ");
             col = 1;
         }
         size_t wrote = help_append(out, cap, len, " %s%s", TOOLS[i].name, sep);
         len += wrote;
         col += wrote;
+        shown++;
     }
     len += help_append(out, cap, len, "\n");
     (void)len; /* final length is not needed; the buffer is NUL-terminated */
