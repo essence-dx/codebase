@@ -96,11 +96,34 @@ compiled** under the test flags, sanitizer or not, including the ones the
 sanitizer flags touch; the failure was at the link and only because of the
 runtime that is not installed.
 
+**And a second upstream defect, from the same build.** GCC 16's
+`-Wfree-nonheap-object` caught a test that frees a **poison pointer**:
+
+```
+tests/test_daemon_application.c:780:5: error: 'free' called on a pointer to an
+unallocated object '1' [-Werror=free-nonheap-object]
+```
+
+The test arms the address 1 as a sentinel, to prove that a callback did *not*
+write an output pointer - and then frees the value. If the request never ran,
+which is what happens when the encode step fails, the sentinel is still in
+place and `free((void *)1)` is an invalid free that aborts the whole test
+binary rather than failing one assertion. The house already has the pattern
+elsewhere in this suite (`if (ledger != (cbm_test_impact_ledger_t *)(uintptr_t)1)`),
+so the free is now guarded the same way. A sweep of the suite for that shape
+finds this one site and no other.
+
+**The pattern is worth naming.** GCC 16's stricter analysis has now found two
+genuine defects in upstream's test suite that upstream's own CI cannot see,
+because that CI compiles with clang. Neither is in the product; both are in
+the tests that guard the product.
+
 **Executed.**
 
 | Check | Result |
 | --- | --- |
 | `tests/test_daemon_ipc.c` with the test flags | exit 0 - the overflow is gone |
+| `tests/test_daemon_application.c` with the test flags | exit 0 - the invalid free is gone |
 | `tests/test_mcp.c` with the test flags | exit 0 |
 | Every test object under the test flags | compiles |
 | The house test runner | linking with `SANITIZE=` |
