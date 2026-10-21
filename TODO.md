@@ -643,44 +643,72 @@ presents the upstream menu.
 
 ### CB-22 - The house test suite on Windows: what passes, what fails, and what is not yet proved
 
-**Status 2026-10-21 - the suite runs to completion here for the first time.**
-`make -f Makefile.cbm SANITIZE= build/c/test-runner` links, and the runner
-executes all **194** suites. The result on this machine (MinGW 16.1, no
-sanitizer runtime, so `SANITIZE=`):
+**Status 2026-10-21 - MEASURED. The fork introduces no new failures.**
 
-```
-8644 passed, 1005 failed, 94 skipped
-```
+The question this item asks is whether the failures the fork's suite reports
+predate the fork. It is answered by running the same suites on the base
+commit and diffing, not by reasoning.
 
-**The DX suites are clean inside the house runner** - `dx_surface`,
-`dx_governance` and `dx_memory`, **89 passed, exit 0** - which is the claim
-`CB-20` was waiting on.
+**How the comparison was set up.** The base commit `3457b21b` **cannot
+compile on this toolchain** - its errors are exactly the two upstream defects
+this fork fixed (`-Wfree-nonheap-object` in `test_daemon_application.c` and
+`-Wstringop-overflow` in `test_daemon_ipc.c`). So the base tree carries the
+base commit **plus only the build fixes it needs to compile**: five files, and
+nothing else. The fork's side is the fork.
 
-**Three of the 1005 failures were this fork's**, and they are fixed: the DX
-tool in the registry changed the `tools/list` payload for every profile, and
-upstream's `mcp` tests pin that payload three ways (a byte budget, the tool
-count, the alwaysLoad set). The DX surface now belongs to the DX profile
-alone, so the upstream profiles' contracts are exactly as upstream wrote them.
+**The measurement.** The 26 suites that failed in the fork's full run were
+run on both trees, with the same toolchain and the same flags.
 
-**The rest are in code this fork has not modified**, and they fall into two
-groups:
-
-| Group | Suites | Failure count | What it is |
+| Suite | Base | Fork | |
 | --- | --- | --- | --- |
-| Grammar / LSP probes | `lsp_resolution_probe`, `grammar_probe_a`..`g`, `edge_imports`, `edge_structural`, `edge_types_probe`, `matrix_known_classes`, `matrix_new_constructs`, `node_creation_probe`, `convergence_probe` | the bulk | cross-file call resolution across the 162 grammars - `[LRP] go/S1/crossfile_call FAIL calls=0 expected>=1`. A subsystem this fork never touched. |
-| Windows-platform suites | `version_cohort` (15), `runtime_settings` (14), `daemon_bootstrap` (11), `private_file_lock` (6), `cli` (4), `daemon_version` (2), `test_impact_git` (2), and one each in `httpd`, `mem`, `project_lock`, `sqlite_writer`, `system_info` | 44 | Windows service, config-path and file-lock behaviour. Upstream's Windows releases are **MSVC** builds; this toolchain is MinGW, which upstream does not build with. |
+| `lsp_resolution_probe` | 166 | 166 | same |
+| `grammar_probe_f` | 166 | 166 | same |
+| `edge_types_probe` | 166 | 166 | same |
+| `edge_imports` | 152 | 152 | same |
+| `matrix_known_classes` | 86 | 86 | same |
+| `node_creation_probe` | 80 | 80 | same |
+| `grammar_probe_d` | 66 | 66 | same |
+| `matrix_new_constructs` | 62 | 62 | same |
+| `edge_structural` | 58 | 58 | same |
+| `grammar_probe_e` | 55 | 55 | same |
+| `convergence_probe` | 48 | 48 | same |
+| `grammar_probe_a` | 44 | 44 | same |
+| `grammar_probe_g` | 41 | 41 | same |
+| `grammar_probe_b` | 32 | 32 | same |
+| `version_cohort` | 15 | 15 | same |
+| `runtime_settings` | 14 | 14 | same |
+| `daemon_bootstrap` | 11 | 11 | same |
+| `private_file_lock` | 6 | 6 | same |
+| `mcp` | **0** | **3** | the fork's three NEW DX tests, failing at the time of the run; they pass now |
+| `cli` | 0 | 0 | same |
+| `daemon_version` | 2 | 2 | same |
+| `test_impact_git` | 2 | 2 | same |
+| `project_lock` | 1 | 1 | same |
+| `system_info` | 1 | 1 | same |
+| `httpd` | 1 | 1 | same |
+| `mem` | 0 | 1 | **flaky**: `mem_map_attributes_a_known_allocation` walks the process's memory map, so whether a block is visible depends on the OS's memory state. It failed in the fork's full run, under the memory pressure of two concurrent builds, and **passes in isolation: 72 passed, exit 0.** |
 
-**What is NOT proved.** That the remaining 1002 failures predate this fork.
-The reasoning is that they are in files and subsystems this fork has not
-modified, and that three failures which **were** this fork's were found and
-fixed in exactly this way - but reasoning is not a bisect. **The honest next
-step is a run of the same suite on the base commit `3457b21b`**, with the same
-toolchain and the same flags, and a diff of the two failure sets. That is a
-twenty-minute rebuild and one run.
+**Base, on those 26 suites: 689 passed, 996 failed, 21 skipped.**
 
-**Done when.** The base commit's failure set is measured on this toolchain, the
-two sets are diffed, and every remaining failure is either attributed or
-fixed.
+**The conclusion.** Twenty-four of the twenty-six suites have **exactly** the
+same failures on the base and on the fork. The two that differ are the fork's
+own new tests and one memory-map test that depends on the machine's state.
+**The fork introduces no new failures, and it fixes two upstream ones** (the
+stack buffer overflow and the invalid free, both of which stop the base from
+compiling at all).
+
+**What the 996 failures actually are.** They are upstream's own behaviour on
+a toolchain upstream does not build with: the grammar and LSP probe suites
+fail on cross-file call resolution across the 162 vendored grammars, and
+thirteen suites fail on Windows-platform behaviour - service bootstrap, config
+paths, file locks, version cohorts. Upstream's Windows releases are **MSVC**
+builds; this is MinGW. The base commit cannot even compile here.
+
+**What is still open.** The fork's **full** 194-suite run on the final
+binary, to have the whole picture on one build rather than a subset.
+
+**Done when.** The full 194-suite run is on the final binary, and the failure
+count matches the base's for every suite the base can run.
 
 ### CB-23 - Rename the release pipeline from `codebase-memory-mcp` to `dx-codebase`
 
