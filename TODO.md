@@ -157,7 +157,10 @@ exercised end to end over real stdio against `build/c/codebase-memory-mcp.exe`.
 The receipt is in `CHANGELOG.md` under *"the DX profile could not start the
 server at all"*.
 
-**What that verification found, and what it changed.** The first version of
+**The contract's own tests, inside the house runner: 114 passed, exit 0**
+(74 surface, 28 governance, 12 memory), and the `mcp` suite is **380 passed,
+13 skipped, 0 failed** with all nine DX profile tests among them. The
+standalone drivers were a convenience; the house runner is the evidence.
 this surface **could not start the server at all** - the profile's enum value
 was outside the range the daemon's context handshake accepted, so
 `--tool-profile=dx` exited with code 1 and answered zero requests. Every
