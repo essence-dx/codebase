@@ -19,6 +19,78 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `fix:` a Windows heap corruption in the base's memory accounting
+
+**The house test suite crashed on the first attempt to run it, and the cause
+was upstream's.** This is the defect that made the Windows test story
+impossible here, and it is the largest thing this audit found.
+
+```
+STATUS_HEAP_CORRUPTION (0xC0000374)
+=== arena ===
+  arena_init_exact_one_block_then_append_block_growth
+```
+
+**The mechanism.** `src/foundation/mem_core.c` asks the platform for a block's
+usable size, and on Windows that is msvcrt's `_msize`:
+
+```c
+#elif defined(_WIN32)
+#include <malloc.h> /* _msize */
+#define CBM_USABLE_SIZE(p) _msize((void *)(p))
+```
+
+**msvcrt's `_msize` is only defined for a pointer that came from msvcrt's own
+malloc.** On Windows, every block the memory classes hand out came from
+**mimalloc** - the product build binds the tree-sitter runtime to mimalloc
+outright, and the test build's `--wrap` allocator routes `malloc` to
+`mi_malloc`. So `_msize` was being asked about a mimalloc block. It reads
+mimalloc's metadata as if it were the CRT's header, returns a bogus size, and
+the CRT's heap accounting goes with it. The process dies.
+
+**Why the linker could not save it.** The build defines `__wrap__msize` and the
+wrap is in the link line - and it is **never reached**. On 64-bit Windows the
+call is an indirect call through the import thunk, so the object references
+`__imp__msize`, not `_msize`, and `--wrap` redirects the symbol, not the
+thunk:
+
+```
+$ nm mem_core.o | grep msize
+                 U __imp__msize
+```
+
+**The fix.** Only the allocator that made a block can answer its size, so ask
+mimalloc when the block is one of its:
+
+```c
+#define CBM_USABLE_SIZE(p)                                                    \
+    (mi_is_in_heap_region((void *)(p)) ? mi_usable_size((void *)(p))         \
+                                       : _msize((void *)(p)))
+```
+
+The check is a range test over mimalloc's own region list: safe for a CRT
+pointer, and false before mimalloc has initialised - when there are no
+mimalloc blocks anyway and `_msize` is the right answer.
+
+**How it was established.** By experiment, because the answer had to be
+certain, not argued:
+
+| Step | Result |
+| --- | --- |
+| A standalone build of the arena test, from the base's own sources | **passes** - the arena is not the bug |
+| The same build with **upstream's** `arena.h`, from the base commit `3457b21b` | **crashes identically** - the DX layer is not the bug |
+| The same build plus the runner's `--wrap` allocator | **crashes** - that is the trigger |
+| A probe printing three answers for one block | the crash is at `_msize`, on a block mimalloc made |
+
+**Why it survived upstream.** Upstream's Windows releases are MSVC builds.
+MSVC has no `--wrap`, so upstream never puts a mimalloc block behind a call
+to msvcrt's `_msize` - the query is always made about a block its own
+allocator made. The defect needs the combination this fork needs: MinGW, the
+`--wrap` allocator, and mimalloc.
+
+**Executed.** The arena repro passes under the runner's allocator with the
+fix, and fails without it.
+
 ### 2026-10-21 - `fix:` a stack buffer overflow in upstream's own test suite
 
 **Found by the toolchain, not by reading.** GCC 16's `-Wstringop-overflow`
@@ -126,7 +198,30 @@ the tests that guard the product.
 | `tests/test_daemon_application.c` with the test flags | exit 0 - the invalid free is gone |
 | `tests/test_mcp.c` with the test flags | exit 0 |
 | Every test object under the test flags | compiles |
-| The house test runner | linking with `SANITIZE=` |
+| `make -f Makefile.cbm SANITIZE= build/c/test-runner` | **links**, exit 0 |
+| The house runner's suite list | 194 suites, including `dx_surface`, `dx_governance`, `dx_memory` |
+| **The DX suites, inside the house runner** | **89 passed, exit 0** |
+
+**The gap is closed.** The DX suites were written to run in the project's own
+harness from the start - `tests/test_main.c` registers them and `Makefile.cbm`
+carries them in `TEST_MCP_SRCS` - but until now they had only ever run against
+a standalone driver that supplied its own counters and its own `main`. They
+now run where the other 191 suites run, and they pass:
+
+```
+=== dx_memory ===
+  dx_the_hash_is_stable_and_hexadecimal                  PASS
+  ...
+  dx_recall_rejects_a_non_array                          PASS
+
+────────────────────────────────────────────
+  89 passed
+────────────────────────────────────────────
+```
+
+The standalone driver was a convenience, not evidence. A suite that passes
+only under a driver you wrote yourself proves the module works, not that the
+project's harness runs it.
 
 ### 2026-10-21 - `feat:` the request says what it needs, and the session says which project
 
