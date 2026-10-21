@@ -116,8 +116,38 @@ stops has stopped on a failure. So:
 | **89 DX contract tests in total** | all green |
 | `gcc -fanalyzer` over the three DX modules and their three test files | **clean** |
 | The base tools' required fields, read from the running server | the table above |
-| The DX surface, driven over real stdio against the built binary | one tool; the four-field envelope enforced; `audit`, `shape` and `next` present on every answer |
-| The `isError` / `next` / session-project changes | unit-tested; **not yet in a built binary** - the receipt below is from the binary built at 10:29, which carries the profile fix |
+| `make -f Makefile.cbm cbm` | **links**, exit 0 |
+| The DX surface, driven over real stdio against the **final** binary | exit 0; **4 responses**; exactly one tool (`dx_codebase`, `alwaysLoad`); the four-field envelope enforced; `audit`, `shape` and `next` on every answer; an errored answer's `next` is `inspect` |
+
+The receipt from the final binary, verbatim:
+
+```
+exit code: 0
+responses: 4
+
+tools/list
+  tool count: 1
+  dx_codebase  alwaysLoad=True
+
+tools/call, missing envelope
+  isError: True
+  text: dx_codebase: 'draft' is required and must be an object with 'reason' and 'type'
+
+tools/call, complete envelope (no index in this environment)
+  isError: True
+  audit: Answered from the indexed graph. The committed request type was 'details', which the
+         draft also proposed. The graph is the only source consulted; where it does not know,
+         the answer says so.
+  next:  {"kind":"inspect","detail":"the answer was an error, not a result; read it and decide
+          what to do next"}
+  shape: {"source":"outline","tokens":75,"over_budget":false,"bodies_included":0}
+  text:  {"error":"project not found or not indexed","hint":"No projects indexed yet. Call
+          index_repository first."}
+```
+
+The last line is the base's own honest error, passed through untouched. A tool
+that hides a failure behind a cheerful answer is worse than no tool, and the
+DX surface says what happened and what to do next.
 
 **New house tests**, where both halves are linked and can be compared:
 
@@ -211,7 +241,7 @@ INSTRUCTIONS` now says all of that, and the profile switch selects it.
 | Check | Result |
 | --- | --- |
 | `--tool-profile=dx` against the built binary, **before** the fix | exit 1, "daemon session context was rejected", **0 responses** |
-| `--tool-profile=dx` against the built binary, **after** the fix | see the receipt below |
+| `--tool-profile=dx` against the built binary, **after** the fix | exit 0, **4 responses**, exactly one tool |
 | `tools/list` under the DX profile | exactly one tool: `dx_codebase`, marked `alwaysLoad` |
 | `tools/call` with a missing envelope | refused with the missing fields named |
 | The surface contract tests | 44 passed, exit 0 |
