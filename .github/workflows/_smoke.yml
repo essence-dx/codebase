@@ -109,7 +109,7 @@ jobs:
       - name: Extract release artifact
         run: |
           mkdir -p "$RUNNER_TEMP/cbm-artifact"
-          tar -xzf codebase-memory-mcp-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz \
+          tar -xzf dx-codebase-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz \
             -C "$RUNNER_TEMP/cbm-artifact"
           chmod +x "$RUNNER_TEMP/cbm-artifact/codebase-memory-mcp"
 
@@ -211,11 +211,11 @@ jobs:
           ARCH=${{ matrix.arch }}
           ARTIFACT_DIR="$(cygpath -u "$RUNNER_TEMP")/cbm-artifact"
           mkdir -p "$ARTIFACT_DIR"
-          unzip -o "codebase-memory-mcp-windows-${ARCH}.zip" -d "$ARTIFACT_DIR"
+          unzip -o "dx-codebase-windows-${ARCH}.zip" -d "$ARTIFACT_DIR"
           test -s "$ARTIFACT_DIR/codebase-memory-mcp.exe"
           # ONE executable per runtime set: a payload sibling would mean the
           # removed launcher split came back.
-          test ! -e "$ARTIFACT_DIR/codebase-memory-mcp.payload.exe"
+          test ! -e "$ARTIFACT_DIR/dx-codebase.payload.exe"
           # Pre-flight the image from a profile-rooted directory: the shared
           # runner workspace is deliberately not a valid install root.
           PROFILE_ROOT="$(cygpath -u "$USERPROFILE")"
@@ -308,7 +308,7 @@ jobs:
       - name: Extract release artifact
         run: |
           mkdir -p "$RUNNER_TEMP/cbm-artifact"
-          tar -xzf codebase-memory-mcp-linux-${{ matrix.arch }}-portable.tar.gz \
+          tar -xzf dx-codebase-linux-${{ matrix.arch }}-portable.tar.gz \
             -C "$RUNNER_TEMP/cbm-artifact"
           chmod +x "$RUNNER_TEMP/cbm-artifact/codebase-memory-mcp"
 
@@ -360,11 +360,14 @@ jobs:
       - name: Build Glama image and verify MCP introspection
         run: bash pkg/glama/verify.sh
       - name: Test homebrew installation
+        # DISABLED IN THE FORK: there is no homebrew tap for this fork yet. The brew
+        # formula name belongs to upstream's tap, and a fork must not publish under it.
+        if: false
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
         run: |
           eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          brew tap deusdata/codebase-memory-mcp "$GITHUB_WORKSPACE"
-          brew trust deusdata/codebase-memory-mcp
-          brew install codebase-memory-mcp
-          codebase-memory-mcp --version
+          brew tap deusdata/dx-codebase "$GITHUB_WORKSPACE"
+          brew trust deusdata/dx-codebase
+          brew install dx-codebase
+          dx-codebase --version

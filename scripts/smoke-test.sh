@@ -3770,7 +3770,7 @@ if [ "$DL_OS" = "darwin" ] || [ "$DL_OS" = "linux" ]; then
 else
   DL_EXT="zip"
 fi
-DL_ARCHIVE="codebase-memory-mcp-${DL_OS}-${DL_ARCH}.${DL_EXT}"
+DL_ARCHIVE="dx-codebase-${DL_OS}-${DL_ARCH}.${DL_EXT}"
 
 # 12a: curl download
 echo "--- Phase 12a: curl download ---"

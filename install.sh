@@ -16,7 +16,7 @@ set -euo pipefail
 # called because the final line hasn't arrived yet.
 main() {
 
-REPO="DeusData/codebase-memory-mcp"
+REPO="essence-dx/codebase"
 INSTALL_DIR="$HOME/.local/bin"
 SKIP_CONFIG=false
 CLIENTS_SET=false
@@ -170,7 +170,7 @@ fi
 PORTABLE=""
 [ "$OS" = "linux" ] && PORTABLE="-portable"
 
-ARCHIVE="codebase-memory-mcp-${OS}-${ARCH}${PORTABLE}.${EXT}"
+ARCHIVE="dx-codebase-${OS}-${ARCH}${PORTABLE}.${EXT}"
 
 URL="${CBM_DOWNLOAD_URL}/${ARCHIVE}"
 

@@ -132,7 +132,7 @@ fi
 # Member set and ORDER mirror scripts/package-release.sh (the Windows
 # single-binary contract locks that order); a fixture with a different inventory
 # would smoke a release layout we never ship.
-EXPECTED_ARTIFACT="codebase-memory-mcp-${OS}-${ARCH}.tar.gz"
+EXPECTED_ARTIFACT="dx-codebase-${OS}-${ARCH}.tar.gz"
 tar -czf "$FIXTURE_DIR/$EXPECTED_ARTIFACT" -C "$FIXTURE_DIR" \
     codebase-memory-mcp LICENSE install.sh THIRD_PARTY_NOTICES.md
 
@@ -140,7 +140,7 @@ tar -czf "$FIXTURE_DIR/$EXPECTED_ARTIFACT" -C "$FIXTURE_DIR" \
 # smoke started from the dynamic production binary.
 if [ "$OS" = "linux" ]; then
     cp "$FIXTURE_DIR/$EXPECTED_ARTIFACT" \
-        "$FIXTURE_DIR/codebase-memory-mcp-${OS}-${ARCH}-portable.tar.gz"
+        "$FIXTURE_DIR/dx-codebase-${OS}-${ARCH}-portable.tar.gz"
 fi
 (cd "$FIXTURE_DIR" && { sha256sum *.tar.gz > checksums.txt 2>/dev/null ||
     shasum -a 256 *.tar.gz > checksums.txt; })

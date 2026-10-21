@@ -25,7 +25,7 @@ if ([Environment]::OSVersion.Version.Build -ge 20348 -and
 [Net.ServicePointManager]::SecurityProtocol = $CbmProtocols
 Add-Type -AssemblyName System.Net.Http
 
-$Repo = "DeusData/codebase-memory-mcp"
+$Repo = "essence-dx/codebase"
 $InstallDir = "$env:LOCALAPPDATA\Programs\codebase-memory-mcp"
 $BinName = "codebase-memory-mcp.exe"
 $WindowsArchiveNames = @(
@@ -186,7 +186,7 @@ function New-CbmExclusiveTempDirectory {
 }
 
 # Build download URL
-$Archive = "codebase-memory-mcp-windows-$Arch.zip"
+$Archive = "dx-codebase-windows-$Arch.zip"
 $Url = "$BaseUrl/$Archive"
 
 # Download

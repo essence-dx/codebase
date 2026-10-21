@@ -225,6 +225,8 @@ jobs:
       # digests are added here, BEFORE attestation, so the attested artifact
       # covers both names.
       - name: Cover legacy ui-* aliases in checksums
+        # DISABLED IN THE FORK: The fork publishes no legacy upstream aliases; there is no 0.9.x to keep alive.
+        if: false
         run: scripts/ci/append-legacy-alias-checksums.sh checksums.txt
 
       - name: Attest checksum provenance
@@ -504,6 +506,8 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Publish to npm
+        # DISABLED IN THE FORK: A fork must not publish under upstream's npm name. The registry name for the fork is an open decision (TODO.md CB-23); until it is made, the fork ships GitHub release assets only.
+        if: false
         working-directory: pkg/npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -540,6 +544,8 @@ jobs:
           python-version: '3.12'
 
       - name: Build PyPI distribution
+        # DISABLED IN THE FORK: Same reason as the npm step: the PyPI project name belongs to upstream.
+        if: false
         working-directory: pkg/pypi
         run: |
           # Every byte of the publish toolchain is bound by hash: version pins
@@ -558,6 +564,8 @@ jobs:
           twine check dist/*
 
       - name: Publish to PyPI
+        # DISABLED IN THE FORK: Same reason as the npm step: the PyPI project name belongs to upstream.
+        if: false
         working-directory: pkg/pypi
         env:
           TWINE_USERNAME: __token__
@@ -660,9 +668,13 @@ jobs:
           tar xzf "$asset" mcp-publisher
 
       - name: Authenticate to MCP Registry (GitHub OIDC)
+        # DISABLED IN THE FORK: The fork does not publish to the MCP Registry until the registry name is settled (TODO.md CB-23).
+        if: false
         run: ./mcp-publisher login github-oidc
 
       - name: Publish server.json to MCP Registry
+        # DISABLED IN THE FORK: The fork does not publish to the MCP Registry until the registry name is settled (TODO.md CB-23).
+        if: false
         run: ./mcp-publisher publish
 
   # ── 9. Atomic un-draft (only after npm + PyPI succeed) ────────
@@ -682,6 +694,8 @@ jobs:
       # verify: aliases contain the same selected executable bytes already
       # hash-bound to the pre-smoke VirusTotal verdicts.
       - name: Publish legacy ui-* archive aliases
+        # DISABLED IN THE FORK: The fork publishes no legacy upstream aliases; there is no 0.9.x to keep alive.
+        if: false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/ci/publish-legacy-aliases.sh "${{ inputs.version }}" "$GITHUB_REPOSITORY"

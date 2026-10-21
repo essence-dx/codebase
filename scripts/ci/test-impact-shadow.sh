@@ -13,7 +13,7 @@
 #
 # Usage: scripts/ci/test-impact-shadow.sh --fetch-release DIR [--repo OWNER/REPO]
 #          Download the latest release's archive for this host + checksums.txt
-#          into DIR, verify the SHA-256, extract DIR/codebase-memory-mcp.
+#          into DIR, verify the SHA-256, extract DIR/dx-codebase.
 #          Needs GH_TOKEN (read-only); $GH overrides the gh command.
 #        scripts/ci/test-impact-shadow.sh --binary PATH --out DIR [--base REV] [--depth N]
 #          Index this checkout into a throwaway cache (HOME, XDG dirs and
@@ -31,7 +31,7 @@ set -euo pipefail
 usage() { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; }
 
 FETCH_DIR=""
-REPO="${GITHUB_REPOSITORY:-DeusData/codebase-memory-mcp}"
+REPO="${GITHUB_REPOSITORY:-essence-dx/codebase}"
 BINARY=""
 OUT=""
 BASE="HEAD^1"
@@ -77,10 +77,10 @@ sha256_check() { # file with "<sha>  <name>" lines, run in the archive's dir
 
 if [ -n "$FETCH_DIR" ]; then
     case "$(uname -s)/$(uname -m)" in
-    Linux/x86_64) asset=codebase-memory-mcp-linux-amd64.tar.gz ;;
-    Linux/aarch64 | Linux/arm64) asset=codebase-memory-mcp-linux-arm64.tar.gz ;;
-    Darwin/arm64) asset=codebase-memory-mcp-darwin-arm64.tar.gz ;;
-    Darwin/x86_64) asset=codebase-memory-mcp-darwin-amd64.tar.gz ;;
+    Linux/x86_64) asset=dx-codebase-linux-amd64.tar.gz ;;
+    Linux/aarch64 | Linux/arm64) asset=dx-codebase-linux-arm64.tar.gz ;;
+    Darwin/arm64) asset=dx-codebase-darwin-arm64.tar.gz ;;
+    Darwin/x86_64) asset=dx-codebase-darwin-amd64.tar.gz ;;
     *)
         echo "test-impact-shadow.sh: no release archive for $(uname -s)/$(uname -m)" >&2
         exit 1
@@ -94,7 +94,7 @@ if [ -n "$FETCH_DIR" ]; then
     grep " $asset\$" "$FETCH_DIR/checksums.txt" >"$FETCH_DIR/asset.sha256"
     (cd "$FETCH_DIR" && sha256_check asset.sha256)
     tar -xzf "$FETCH_DIR/$asset" -C "$FETCH_DIR" codebase-memory-mcp
-    echo "release binary: $FETCH_DIR/codebase-memory-mcp ($asset, SHA-256 verified)"
+    echo "release binary: $FETCH_DIR/dx-codebase ($asset, SHA-256 verified)"
     exit 0
 fi
 

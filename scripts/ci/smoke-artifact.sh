@@ -129,7 +129,7 @@ scripts/package-release.sh "$GOOS" "$GOARCH" \
     --third-party-notices "$NOTICES" \
     --out-dir "$WORK_DIR"
 
-NAME="codebase-memory-mcp-${GOOS}-${GOARCH}"
+NAME="dx-codebase-${GOOS}-${GOARCH}"
 EXTRACT_DIR="$WORK_DIR/extract"
 mkdir -p "$EXTRACT_DIR"
 if [ "$GOOS" = "windows" ]; then

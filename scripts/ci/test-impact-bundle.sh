@@ -17,7 +17,7 @@
 set -euo pipefail
 
 GH="${GH:-gh}"
-REPO="${GITHUB_REPOSITORY:-DeusData/codebase-memory-mcp}"
+REPO="${GITHUB_REPOSITORY:-essence-dx/codebase}"
 WORKFLOW="test-impact-artifact.yml"
 
 usage() { sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; }

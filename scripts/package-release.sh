@@ -129,7 +129,7 @@ if [ -n "$THIRD_PARTY_NOTICES" ]; then
     THIRD_PARTY_NOTICES="$(cd "$(dirname "$THIRD_PARTY_NOTICES")" && pwd -P)/$(basename "$THIRD_PARTY_NOTICES")"
 fi
 OUT_DIR="$(mkdir -p "$OUT_DIR" && cd "$OUT_DIR" && pwd -P)"
-NAME="codebase-memory-mcp-${GOOS}-${GOARCH}"
+NAME="dx-codebase-${GOOS}-${GOARCH}"
 
 sha256_file() {
     python3 - "$1" <<'PY'
@@ -189,11 +189,11 @@ PY
 assert_expected_hash "$SELECTED_BINARY" "selected binary" || exit 2
 
 if [ "$GOOS" = "windows" ]; then
-    STAGED_BINARY_NAME="codebase-memory-mcp.exe"
+    STAGED_BINARY_NAME="dx-codebase.exe"
     INSTALLER="install.ps1"
     ARCHIVE_OUT="$OUT_DIR/$NAME.zip"
 else
-    STAGED_BINARY_NAME="codebase-memory-mcp"
+    STAGED_BINARY_NAME="dx-codebase"
     INSTALLER="install.sh"
     ARCHIVE_OUT="$OUT_DIR/$NAME.tar.gz"
 fi
@@ -290,13 +290,13 @@ build_mcpb_bundle() {
     cat >"$stage/manifest.json" <<EOF
 {
   "manifest_version": "0.3",
-  "name": "codebase-memory-mcp",
+  "name": "dx-codebase",
   "display_name": "Codebase Memory",
   "version": "$mcpb_version",
   "description": "Local code intelligence connecting code, docs and infrastructure for developers and AI agents.",
-  "author": { "name": "DeusData", "url": "https://github.com/DeusData" },
-  "repository": { "type": "git", "url": "https://github.com/DeusData/codebase-memory-mcp" },
-  "homepage": "https://deusdata.github.io/codebase-memory-mcp/",
+  "author": { "name": "essence-dx", "url": "https://github.com/essence-dx" },
+  "repository": { "type": "git", "url": "https://github.com/essence-dx/codebase" },
+  "homepage": "https://github.com/essence-dx/codebase",
   "license": "MIT",
   "server": {
     "type": "binary",

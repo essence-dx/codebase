@@ -83,9 +83,9 @@ MCPB_TARGETS = (
     "windows-arm64",
 )
 CANONICAL_ARCHIVES = frozenset(
-    [f"codebase-memory-mcp-{target}.tar.gz" for target in UNIX_TARGETS]
-    + [f"codebase-memory-mcp-{target}.zip" for target in WINDOWS_TARGETS]
-    + [f"codebase-memory-mcp-{target}.mcpb" for target in MCPB_TARGETS]
+    [f"dx-codebase-{target}.tar.gz" for target in UNIX_TARGETS]
+    + [f"dx-codebase-{target}.zip" for target in WINDOWS_TARGETS]
+    + [f"dx-codebase-{target}.mcpb" for target in MCPB_TARGETS]
 )
 # One composition ships; the association column is retained so the schema stays
 # stable for the gate and release-notes consumers.

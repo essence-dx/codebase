@@ -395,8 +395,8 @@ jobs:
             windows-amd64 windows-arm64; do
             goos="${target%%-*}"
             goarch="${target#*-}"
-            selected_name=codebase-memory-mcp
-            test "$goos" != windows || selected_name=codebase-memory-mcp.exe
+            selected_name=dx-codebase
+            test "$goos" != windows || selected_name=dx-codebase.exe
             selected="release-selection/selected/$target/$selected_name"
             notices="release-candidate-scan/notices/$target/THIRD_PARTY_NOTICES.md"
             test -f "$selected"
