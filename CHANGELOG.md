@@ -19,6 +19,77 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `fix:` the budget could replace a failure with a size complaint
+
+**The budget is a gate on ANSWERS.** An answer that does not fit is refused
+with the excess named, because a silently shortened answer reads as a complete
+one.
+
+It was also applied to **failures**. The base's error result is a tool result
+too, so an error larger than the budget was replaced with:
+
+```
+The answer was 5120 tokens and the budget was 3200, so it is refused rather
+than truncated: raise max_tokens, narrow the request, or ask for one symbol
+at a time.
+```
+
+**and the actual failure was gone.** The agent was left with a complaint about
+tokens and no idea that the real problem was *"the project is not indexed"* or
+*"no such symbol"*. A failure the agent needs to read is worth more than a
+budget honoured.
+
+The budget now applies to answers only. The shape still reports the truth - a
+failure costs tokens too - and the failure is passed through untouched, with
+its own message.
+
+The *"is this an error?"* test now lives in `dx_surface.c`, where both callers
+can share it: the surface module needs it for the budget, and the server
+needed the same question for the `verify` handler's lookup-failed separation.
+There was one copy in `mcp.c`; there is now one copy, in the module that owns
+the answer shape.
+
+**Executed.** The surface contract tests are **66 passed**, exit 0 (was 64),
+and the new tests are a pair - the gate must still close for an answer:
+
+| Test | Asserts |
+| --- | --- |
+| `dx_the_budget_never_replaces_a_failure_with_a_size_complaint` | the failure survives, and the shape does not claim it was over budget |
+| `dx_an_answer_over_the_budget_is_still_refused` | the gate still closes for an answer |
+
+### 2026-10-21 - `fix:` the audit line claimed the graph was consulted for two governance types
+
+The escape answer said *"the graph is the only source consulted"* when no
+graph had been consulted. That was fixed. But the same wording was used for
+the other two governance types, and for both of them it is also false:
+
+| Type | Answered from | The graph consulted? |
+| --- | --- | --- |
+| `certificate` | the paths and the boundaries the **caller** supplied | **no** |
+| `enforce` | the findings and the baseline the **caller** supplied | **no** |
+
+Neither consults the graph at all, so the audit line was certifying that the
+graph had been consulted for a verdict computed entirely from what the caller
+handed over.
+
+An audit line that certifies something that did not happen is the one thing
+this surface must never emit - the whole point of the field is that a reader
+can trust it. So the audit now says what was actually consulted, per type:
+
+| Type | The audit says |
+| --- | --- |
+| `escape` | *"the graph was not consulted at all"* |
+| `certificate` | *"the caller's paths and boundaries are the only source consulted"* |
+| `enforce` | *"the caller's findings and baseline are the only source consulted"* |
+| everything else, and `verify` | *"the graph is the only source consulted"* |
+
+**Three new tests, one per case**, so the wording cannot drift back - and the
+third matters as much as the other two: a graph answer **must** still say the
+graph was the only source consulted, or the fix has cost the field its
+meaning.
+
+**Executed.** The surface contract tests are **69 passed**, exit 0 (was 66).
+
 ### 2026-10-21 - `docs:` a correction, and what the diagnostic cost
 
 **A correction to the receipt for the verify fix.** The RED run was
