@@ -31,7 +31,7 @@ repository exists and because the losing candidate was deleted afterwards.
 | MCP tools | 17 | 8, of which 1 is exposed by default |
 | Query language | A read-only openCypher subset | FTS5 plus a custom parser |
 | Type resolution | "Hybrid LSP" - 11 language rows | Name matching + 35 framework resolvers + synthesis |
-| Extra subsystems | Semantic embeddings, ADR store, trace ingestion, docs-in-graph, Smart CI, CBM Lens | None of those |
+| Extra subsystems | Semantic embeddings, ADR store, docs-in-graph, Smart CI, CBM Lens. Trace ingestion is a **contract, not a feature** - see below | None of those |
 | Licence | MIT | MIT |
 
 **The decisive differences.**
@@ -39,11 +39,38 @@ repository exists and because the losing candidate was deleted afterwards.
 1. **It has the memory layers the others do not.** Measured against eight layers -
    persistent index, structural graph, semantic retrieval, decision memory, runtime
    memory, cross-repo memory, visual memory, documentation memory - this fork's
-   base has **six**. The removed candidate had **two**: a persistent index and a
+   base has **five**. The removed candidate had **two**: a persistent index and a
    structural graph. It had no embeddings (its own source says "deterministic, no
    embeddings", `colbymchenry/codegraph` at `8beab37`, `src/mcp/tools.ts:3926`), no
    ADR storage (zero occurrences of "ADR" or "architecture decision" in its `src/`),
    no trace memory and no cross-repo model.
+
+   **The runtime-trace layer does not count.** Upstream's own contract document
+   states that `ingest_traces` "returns `status="accepted"`, `traces_received`,
+   and an unimplemented note; this is not an accepted durable mutation, and the
+   handler does not open or mutate a store"
+   (`docs/RUNTIME_TRACE_MODEL.md:50-53`). The design is thorough - versioned
+   identities, commutative aggregation, a composite publication head - but the
+   implementation is a stub. A layer that cannot store anything is not a layer.
+
+   **A second, sharper finding.** Upstream's measurement guide sets a rule the
+   rest of the field breaks: `docs/MEASURING_SAVINGS.md:277` - *"Never turn a
+   result from one repository, question set, model, or machine into a universal
+   savings claim."* The same guide forbids substituting the tool's own query
+   counter for agent tool calls, forbids inferring a missing measurement
+   window, and forbids pseudocounts.
+
+   The base now mostly obeys its own rule: `README.md:473` leads with the
+   31-repository preprint's "10x lower token use and 2.1x fewer tool calls" and
+   demotes the older five-query figure to "an earlier comparison" with a pinned
+   commit. That is the right shape.
+
+   What the base does **not** do is measure against anyone else's harness. The
+   10x is a self-reported number from the project's own paper, and the
+   independent measurements disagree with it in both directions. So this fork
+   inherits the rule and not the number, and every performance claim it makes
+   must name the repository, the question set, the model and the machine - or
+   not be made.
 2. **The graph reaches past the code.** Since v0.12.0 (2026-10-15) the graph carries
    documentation, architecture decisions, diagrams and API specs, and it links
    infrastructure - Kubernetes, Helm, Terraform, Ansible, Compose - to the program a
@@ -174,6 +201,9 @@ a written record.
 | No reranker in the upstream base | `grep -ri rerank src/` returns nothing |
 | Storage root `~/.cache/codebase-memory-mcp` | `README.md:988` |
 | Lens ships in the binary | `README.md:21`, `README.md:29` |
+| `ingest_traces` is a stub, not a store | `docs/RUNTIME_TRACE_MODEL.md:50-53` |
+| The base's own rule against universal savings claims | `docs/MEASURING_SAVINGS.md:277` |
+| The base's current self-reported figure (10x, 31 repos) | `README.md:473` |
 | The removed candidate's 1-tool doctrine | `colbymchenry/codegraph` at `8beab37`, `AGENTS.md` |
 | The removed candidate's "no embeddings" | `colbymchenry/codegraph` at `8beab37`, `src/mcp/tools.ts:3926` |
 
