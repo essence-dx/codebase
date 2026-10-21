@@ -540,8 +540,17 @@ project's own harness. That is a real gap: the standalone driver supplies its
 own counters and its own `main`, so it does not prove the suites run in the
 project's runner.
 
-**Done when.** `make -f Makefile.cbm test` completes on this machine and the
-DX suites report their pass counts inside the house runner.
+**The toolchain facts, so the next attempt does not rediscover them.**
+
+| Fact | Detail |
+| --- | --- |
+| The test build needs `SANITIZE=` | `Makefile.cbm:102` says it: *"Test flags: debug + sanitizers (override SANITIZE= to disable on Windows)"*. The default is `-fsanitize=address,undefined`, and this MinGW has **no sanitizer runtime**: the link fails with `cannot read spec file 'libsanitizer.spec'`. |
+| The whole tree compiles under the test flags | Every object built, including the ones the sanitizer flags touch. The failure was at the link, and only because of the sanitizer runtime. |
+| Two upstream defects only the test build sees | The `lsp_all` unity unit is compiled with `GRAMMAR_CFLAGS_TEST`, which has **no `-Isrc`** - so a header's cross-directory include must be relative. And GCC 16's `-Wstringop-overflow` catches a **stack buffer overflow** in `tests/test_daemon_ipc.c` that clang, which upstream's CI uses, does not. |
+
+**Done when.** `make -f Makefile.cbm SANITIZE= build/c/test-runner` completes
+on this machine, and the DX suites report their pass counts inside the house
+runner rather than in a standalone driver.
 
 **Evidence - the original blocker, for the record.**
 

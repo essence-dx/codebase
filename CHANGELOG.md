@@ -78,7 +78,23 @@ error: static declaration of 'test_dx_profile_parses_from_the_flag' follows
 ```
 
 The house convention is that every test is **defined** before the suite that
-runs it. The definitions now are.
+runs it. The definitions now are - 420 definitions, 420 `RUN_TEST` calls, every
+one matched, no duplicates.
+
+**And a toolchain fact, so the next attempt does not rediscover it.** The test
+build defaults to `-fsanitize=address,undefined`, and this MinGW has **no
+sanitizer runtime**: the link fails with
+
+```
+gcc: fatal error: cannot read spec file 'libsanitizer.spec': No such file or directory
+```
+
+`Makefile.cbm:102` already says what to do - *"Test flags: debug + sanitizers
+(override SANITIZE= to disable on Windows)"* - so the house's own Windows path
+is `make -f Makefile.cbm SANITIZE= build/c/test-runner`. **Every object
+compiled** under the test flags, sanitizer or not, including the ones the
+sanitizer flags touch; the failure was at the link and only because of the
+runtime that is not installed.
 
 **Executed.**
 
@@ -86,7 +102,8 @@ runs it. The definitions now are.
 | --- | --- |
 | `tests/test_daemon_ipc.c` with the test flags | exit 0 - the overflow is gone |
 | `tests/test_mcp.c` with the test flags | exit 0 |
-| The house test runner | building |
+| Every test object under the test flags | compiles |
+| The house test runner | linking with `SANITIZE=` |
 
 ### 2026-10-21 - `feat:` the request says what it needs, and the session says which project
 
