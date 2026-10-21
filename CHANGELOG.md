@@ -19,6 +19,79 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `fix:` three ways the surface answered without being asked
+
+**Three defects, all of the same family: the tool answered a question the
+caller did not ask, or did not ask the question the caller did.**
+
+**1. The forwarded arguments could carry a duplicate key.** The DX layer
+translates its own two fields into the base's vocabulary, and the rule is
+that an explicit parameter beats a default. One of the two honoured the rule
+and the other did not:
+
+```c
+/* max_output_tokens */
+if (max_tokens_set && !caller_set_max_output_tokens) { ... add ... }
+
+/* source_mode */
+if (source_policy == DX_SOURCE_OUTLINE && request_type == DX_REQ_DETAILS) { ... add ... }
+```
+
+A `details` request that set `source_mode` directly had the caller's value
+copied in **and** the layer's default appended after it, so the forwarded
+arguments carried `"source_mode"` **twice**. A JSON object with one key twice
+is ambiguous and a parser is free to take either, so the base might have read
+the caller's `"full"` or the layer's `"outline"` depending on which it looked
+at first. The behaviour was accidentally right and the contract was not. Both
+fields now follow the same rule: the default is only written when there is no
+explicit one.
+
+**2. An unknown field was silently ignored.** The schema says
+`"additionalProperties": false` for the envelope and for `draft`, and the
+layer enforced **neither**. An unknown field was dropped without a word -
+the same defect as the `source: "full"` no-op this surface already refuses,
+and the same thing a caller actually trips over: a typo (`"requets"` for
+`"request"`) was answered as if it were right, with the request simply not
+there. Both are now refused, and the offending field is named.
+
+**3. A failed lookup was reported as a verdict.** The `verify` request resolves
+its subject through the base's snippet lookup, and the base reports **both**
+"no such symbol" *and* every other failure - a project that is not indexed, a
+file that cannot be read - as an **error result**. The DX layer treated every
+non-resolution as `unverifiable`, so the tool answered *"unverifiable"* when
+the truth was *"I could not look it up"*.
+
+That is the same failure as the missing project, one level up: the layer
+failing to ask the right question and then reporting a confident answer about
+it. The contract reserves `unverifiable` for *"the graph was asked and does
+not know"*. A lookup that failed is now an **error**, carrying the base's own
+message:
+
+```
+dx_codebase: the subject could not be looked up, so there is no verdict: ...
+```
+
+The base's result shape carries no other signal, so the distinction is made
+on its message - and **exactly**, matching `"symbol not found"` rather than a
+loose substring that would also match `"project not found"`.
+
+**Also in this commit.** The session project now reaches the **governance**
+requests, not only the ones that dispatch to a base tool. `verify` has no base
+tool, so it was looked up in no project at all, the lookup failed, and the
+verdict could only ever be `unverifiable` - for a subject the graph knew
+perfectly well. With the project missing, a `verify` request now produces
+**neither** "confirmed" nor "unverifiable": it produces an error, which is the
+truth.
+
+**Executed.**
+
+| Check | Result |
+| --- | --- |
+| The surface contract tests | **62 passed**, exit 0 (was 58) |
+| The governance contract tests | 28 passed, exit 0 |
+| The memory contract tests | 12 passed, exit 0 |
+| `gcc -fanalyzer` | clean over the three DX modules and their three test files |
+
 ### 2026-10-21 - `fix:` the instructions described two request types wrongly
 
 **The server instructions are the only description of the surface an agent
