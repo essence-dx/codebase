@@ -19,6 +19,38 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `test:` the full house suite, on the final binary
+
+**194 suites: 8655 passed, 1023 failed, 94 skipped**, on the binary that
+carries every fix in this changelog.
+
+| | |
+| --- | --- |
+| The three DX contract suites | **114 passed, exit 0** (74 surface, 28 governance, 12 memory) |
+| The `mcp` suite | **380 passed, 13 skipped, 0 failed** - all nine DX profile tests among them |
+| The `cli` suite | 300 passed, 26 failed, 11 skipped - **the base tree fails the identical 26 assertions** |
+
+**The failures are the base's own, and that is measured rather than argued.**
+The base tree - the base commit plus only the five build-fix files it needs
+to compile - was run on the same machine with the same flags, and it fails the
+same suites with the same assertions. The `mcp` suite is the one that moved:
+its three failures were this fork's own DX tests, and they pass now.
+
+**One correction to an earlier measurement.** The first comparison recorded
+the `cli` suite as clean on both trees. It is not, and the reason is the
+machine rather than the code: those agent-client install tests write into a
+POSIX `/tmp` path, so their outcome depends on the environment. Run today on
+both trees, the base and the fork fail the **identical 26** assertions
+(`plan=1 installed=0` - the install planned correctly and wrote nothing).
+
+**What the comparison earns is unchanged, and it is stronger:** the base and
+the fork fail identically. The number moves with the machine; the agreement
+does not.
+
+**Not verified here.** `scripts/smoke-test.sh`, which needs a Linux or macOS
+host with a toolchain, and the release pipeline itself, which needs GitHub
+Actions.
+
 ### 2026-10-21 - `docs:` the audit sentence was left lower-case mid-sentence
 
 The audit line is built from a "consulted" clause, and when the clause was

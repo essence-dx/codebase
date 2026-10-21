@@ -715,8 +715,8 @@ run on both trees, with the same toolchain and the same flags.
 | `runtime_settings` | 14 | 14 | same |
 | `daemon_bootstrap` | 11 | 11 | same |
 | `private_file_lock` | 6 | 6 | same |
-| `mcp` | **0** | **3** | the fork's three NEW DX tests, failing at the time of the run; they pass now |
-| `cli` | 0 | 0 | same |
+| `mcp` | **0** | **0** | the fork's three NEW DX tests failed at the time of the run; they pass now, so the suite is clean on both trees |
+| `cli` | 26 | 26 | same, and **measured directly on both trees today**: the base tree and the fork fail the identical 26 assertions |
 | `daemon_version` | 2 | 2 | same |
 | `test_impact_git` | 2 | 2 | same |
 | `project_lock` | 1 | 1 | same |
@@ -726,6 +726,21 @@ run on both trees, with the same toolchain and the same flags.
 
 **Base, on those 26 suites: 689 passed, 996 failed, 21 skipped.**
 
+**The full run on the final binary: 194 suites, 8655 passed, 1023 failed,
+94 skipped.** The `mcp` suite's three failures are gone, which is what the
+DX-profile fixes were for.
+
+**One suite was re-measured directly, because the first comparison reported it
+as clean and it is not.** The `cli` suite's agent-client install tests write
+into a POSIX `/tmp` path, so their outcome depends on the machine, not on the
+code. The first comparison read them as 0 on the base and 0 on the fork. Run
+today on **both** trees, the base tree and the fork fail the **identical 26
+assertions** - `plan=1 installed=0`, the install planned correctly and wrote
+nothing - and the totals are 300 passed, 26 failed, 11 skipped on each.
+
+**What the comparison earns is unchanged and is now stronger: the base and
+the fork fail identically.** The number moves; the agreement does not.
+
 **The conclusion.** Twenty-four of the twenty-six suites have **exactly** the
 same failures on the base and on the fork. The two that differ are the fork's
 own new tests and one memory-map test that depends on the machine's state.
@@ -733,7 +748,7 @@ own new tests and one memory-map test that depends on the machine's state.
 stack buffer overflow and the invalid free, both of which stop the base from
 compiling at all).
 
-**What the 996 failures actually are.** They are upstream's own behaviour on
+**What the 1023 failures actually are.** They are upstream's own behaviour on
 a toolchain upstream does not build with: the grammar and LSP probe suites
 fail on cross-file call resolution across the 162 vendored grammars, and
 thirteen suites fail on Windows-platform behaviour - service bootstrap, config
