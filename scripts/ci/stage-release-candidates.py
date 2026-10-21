@@ -163,7 +163,7 @@ def read_provenance(path: pathlib.Path) -> list[dict[str, str]]:
 
 
 def expected_properties(target: str) -> tuple[str, str, str, str]:
-    binary = "codebase-memory-mcp.exe" if target.startswith("windows-") else "codebase-memory-mcp"
+    binary = "dx-codebase.exe" if target.startswith("windows-") else "dx-codebase"
     file_format = "pe" if target.startswith("windows-") else "macho" if target.startswith("darwin-") else "elf"
     architecture = target.split("-")[1]
     linkage = (

@@ -81,15 +81,15 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/cbm-selected-artifact"
           tar -xzf "$RUNNER_TEMP/cbm-selected-container/dx-codebase-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" \
-            -C "$RUNNER_TEMP/cbm-selected-artifact" codebase-memory-mcp
-          chmod +x "$RUNNER_TEMP/cbm-selected-artifact/codebase-memory-mcp"
-          "$RUNNER_TEMP/cbm-selected-artifact/codebase-memory-mcp" --version
+            -C "$RUNNER_TEMP/cbm-selected-artifact" dx-codebase
+          chmod +x "$RUNNER_TEMP/cbm-selected-artifact/dx-codebase"
+          "$RUNNER_TEMP/cbm-selected-artifact/dx-codebase" --version
       # The soak SEQUENCE and its guards live in the ONE canonical entry
       # scripts/soak-legs.sh — never in workflow YAML. Leg selection is a
       # workflow input so a long #581-only run needs no separate workflow.
       - name: Soak legs (${{ inputs.legs }}, ${{ inputs.duration_minutes }} min each)
         env:
-          SELECTED_BINARY: ${{ runner.temp }}/cbm-selected-artifact/codebase-memory-mcp
+          SELECTED_BINARY: ${{ runner.temp }}/cbm-selected-artifact/dx-codebase
           USE_RELEASE_ARTIFACTS: ${{ inputs.use_release_artifacts }}
         run: |
           binary=build/c/dx-codebase
@@ -158,7 +158,7 @@ jobs:
           mkdir -p "$ARTIFACT_DIR"
           unzip -q "$(cygpath -u "$RUNNER_TEMP")/cbm-selected-container/dx-codebase-windows-amd64.zip" \
             dx-codebase.exe -d "$ARTIFACT_DIR"
-          "$ARTIFACT_DIR/codebase-memory-mcp.exe" --version
+          "$ARTIFACT_DIR/dx-codebase.exe" --version
       # Both release-gating legs via the ONE canonical soak entry; only the
       # protected-TEMP provisioning is venue text. soak-legs.sh resolves .exe.
       - name: Soak legs (${{ inputs.legs }}, ${{ inputs.duration_minutes }} min each)
@@ -169,7 +169,7 @@ jobs:
           export TMPDIR="$(cygpath -u "$CBM_CI_TEMP_ROOT")"
           binary=build/c/dx-codebase
           if [ "${{ inputs.use_release_artifacts }}" = true ]; then
-            binary="$(cygpath -u "$RUNNER_TEMP")/cbm-selected-artifact/codebase-memory-mcp.exe"
+            binary="$(cygpath -u "$RUNNER_TEMP")/cbm-selected-artifact/dx-codebase.exe"
           fi
           scripts/soak-legs.sh --legs "${{ inputs.legs }}" "$binary" ${{ inputs.duration_minutes }}
       - name: Upload metrics
@@ -236,7 +236,7 @@ jobs:
           mkdir -p "$ARTIFACT_DIR"
           unzip -q "$(cygpath -u "$RUNNER_TEMP")/cbm-selected-container/dx-codebase-windows-arm64.zip" \
             dx-codebase.exe -d "$ARTIFACT_DIR"
-          "$ARTIFACT_DIR/codebase-memory-mcp.exe" --version
+          "$ARTIFACT_DIR/dx-codebase.exe" --version
       # Both release-gating legs via the ONE canonical soak entry; only the
       # protected-TEMP provisioning is venue text. soak-legs.sh resolves .exe.
       - name: Soak legs (${{ inputs.legs }}, ${{ inputs.duration_minutes }} min each)
@@ -247,7 +247,7 @@ jobs:
           export TMPDIR="$(cygpath -u "$CBM_CI_TEMP_ROOT")"
           binary=build/c/dx-codebase
           if [ "${{ inputs.use_release_artifacts }}" = true ]; then
-            binary="$(cygpath -u "$RUNNER_TEMP")/cbm-selected-artifact/codebase-memory-mcp.exe"
+            binary="$(cygpath -u "$RUNNER_TEMP")/cbm-selected-artifact/dx-codebase.exe"
           fi
           scripts/soak-legs.sh --legs "${{ inputs.legs }}" "$binary" ${{ inputs.duration_minutes }}
       - name: Upload metrics
@@ -293,13 +293,13 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/cbm-selected-artifact"
           tar -xzf "$RUNNER_TEMP/cbm-selected-container/dx-codebase-linux-${{ matrix.arch }}-portable.tar.gz" \
-            -C "$RUNNER_TEMP/cbm-selected-artifact" codebase-memory-mcp
-          chmod +x "$RUNNER_TEMP/cbm-selected-artifact/codebase-memory-mcp"
-          "$RUNNER_TEMP/cbm-selected-artifact/codebase-memory-mcp" --version
+            -C "$RUNNER_TEMP/cbm-selected-artifact" dx-codebase
+          chmod +x "$RUNNER_TEMP/cbm-selected-artifact/dx-codebase"
+          "$RUNNER_TEMP/cbm-selected-artifact/dx-codebase" --version
       - name: Soak selected portable legs (${{ inputs.legs }}, ${{ inputs.duration_minutes }} min each)
         run: |
           scripts/soak-legs.sh --legs "${{ inputs.legs }}" \
-            "$RUNNER_TEMP/cbm-selected-artifact/codebase-memory-mcp" \
+            "$RUNNER_TEMP/cbm-selected-artifact/dx-codebase" \
             ${{ inputs.duration_minutes }}
       - name: Upload metrics
         if: always()

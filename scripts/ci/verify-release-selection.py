@@ -68,7 +68,7 @@ MAX_MEMBERS = 128
 def archive_specs() -> dict[str, tuple[str, str]]:
     specs: dict[str, tuple[str, str]] = {}
     for target in TARGETS:
-        binary = "codebase-memory-mcp.exe" if target.startswith("windows-") else "codebase-memory-mcp"
+        binary = "dx-codebase.exe" if target.startswith("windows-") else "dx-codebase"
         suffix = ".zip" if target.startswith("windows-") else ".tar.gz"
         specs[f"dx-codebase-{target}{suffix}"] = (target, binary)
         if (
@@ -167,7 +167,7 @@ def load_selection(
     analysis_ids: set[str] = set()
     for row in rows:
         target = row["target"]
-        binary = "codebase-memory-mcp.exe" if target.startswith("windows-") else "codebase-memory-mcp"
+        binary = "dx-codebase.exe" if target.startswith("windows-") else "dx-codebase"
         classifications = {
             variant: row[f"{FIELD_KEY[variant]}_classification"] for variant in VARIANTS
         }

@@ -120,7 +120,7 @@ trap cleanup EXIT
 
 mkdir -p "$FIXTURE_DIR" "$SMOKE_TEMP_DIR" "$SMOKE_HOME" "$SMOKE_XDG_CONFIG" \
     "$SMOKE_APPDATA" "$SMOKE_LOCALAPPDATA"
-cp "$BINARY" "$FIXTURE_DIR/codebase-memory-mcp"
+cp "$BINARY" "$FIXTURE_DIR/dx-codebase"
 if [ -n "$ARTIFACT_DIR" ]; then
     cp "$ARTIFACT_DIR/LICENSE" \
         "$ARTIFACT_DIR/install.sh" "$ARTIFACT_DIR/THIRD_PARTY_NOTICES.md" "$FIXTURE_DIR/"
@@ -134,7 +134,7 @@ fi
 # would smoke a release layout we never ship.
 EXPECTED_ARTIFACT="dx-codebase-${OS}-${ARCH}.tar.gz"
 tar -czf "$FIXTURE_DIR/$EXPECTED_ARTIFACT" -C "$FIXTURE_DIR" \
-    codebase-memory-mcp LICENSE install.sh THIRD_PARTY_NOTICES.md
+    dx-codebase LICENSE install.sh THIRD_PARTY_NOTICES.md
 
 # Linux install/update resolves the portable release asset even when this local
 # smoke started from the dynamic production binary.

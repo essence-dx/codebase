@@ -95,8 +95,8 @@ CANDIDATE_ROOT="$WORK_DIR/candidates"
 scripts/ci/prepare-release-candidates.sh "$GOOS" "$GOARCH" \
     --binary "$SOURCE_BINARY" --out-dir "$CANDIDATE_ROOT"
 
-SELECTED_NAME="codebase-memory-mcp"
-[ "$GOOS" = "windows" ] && SELECTED_NAME="codebase-memory-mcp.exe"
+SELECTED_NAME="dx-codebase"
+[ "$GOOS" = "windows" ] && SELECTED_NAME="dx-codebase.exe"
 SELECTED_BINARY="$CANDIDATE_ROOT/${GOOS}-${GOARCH}/stripped/$SELECTED_NAME"
 [ -f "$SELECTED_BINARY" ] || {
     echo "smoke-artifact: candidate derivation did not produce $SELECTED_BINARY" >&2
@@ -134,19 +134,19 @@ EXTRACT_DIR="$WORK_DIR/extract"
 mkdir -p "$EXTRACT_DIR"
 if [ "$GOOS" = "windows" ]; then
     unzip -q -o "$WORK_DIR/$NAME.zip" -d "$EXTRACT_DIR"
-    test -s "$EXTRACT_DIR/codebase-memory-mcp.exe"
+    test -s "$EXTRACT_DIR/dx-codebase.exe"
     # ONE binary per platform: a payload sibling means the AV-flagged launcher
     # stub came back.
-    test ! -e "$EXTRACT_DIR/codebase-memory-mcp.payload.exe"
+    test ! -e "$EXTRACT_DIR/dx-codebase.payload.exe"
     echo "=== smoke-artifact: smoking EXTRACTED $NAME.zip via vm-smoke.sh ==="
     SMOKE_ARCH="$GOARCH" \
         CBM_SMOKE_ARTIFACT_DIR="$EXTRACT_DIR" \
         bash test-infrastructure/vm/vm-smoke.sh
 else
     tar -xzf "$WORK_DIR/$NAME.tar.gz" -C "$EXTRACT_DIR"
-    chmod +x "$EXTRACT_DIR/codebase-memory-mcp"
+    chmod +x "$EXTRACT_DIR/dx-codebase"
     echo "=== smoke-artifact: smoking EXTRACTED $NAME.tar.gz via smoke-local.sh ==="
     CBM_SMOKE_ARTIFACT_DIR="$EXTRACT_DIR" \
-        scripts/smoke-local.sh "$EXTRACT_DIR/codebase-memory-mcp"
+        scripts/smoke-local.sh "$EXTRACT_DIR/dx-codebase"
 fi
 echo "=== smoke-artifact: $NAME passed ==="

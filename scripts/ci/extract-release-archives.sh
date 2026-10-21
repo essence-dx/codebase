@@ -324,7 +324,7 @@ def validate_namespace(archive_name: str, names: Iterable[str]) -> Dict[str, str
     # platform detection by name is sound for every container kind.
     windows = "-windows-" in archive_name
     if archive_name.endswith(".mcpb"):
-        binary = "server/codebase-memory-mcp.exe" if windows else "server/codebase-memory-mcp"
+        binary = "server/dx-codebase.exe" if windows else "server/dx-codebase"
         fixed = {
             "manifest.json": "runtime",
             binary: "binary",
@@ -332,7 +332,7 @@ def validate_namespace(archive_name: str, names: Iterable[str]) -> Dict[str, str
             "server/THIRD_PARTY_NOTICES.md": "runtime",
         }
     else:
-        binary = "codebase-memory-mcp.exe" if windows else "codebase-memory-mcp"
+        binary = "dx-codebase.exe" if windows else "dx-codebase"
         installer = "install.ps1" if windows else "install.sh"
         fixed = {
             binary: "binary",

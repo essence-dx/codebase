@@ -246,10 +246,10 @@ echo "Checksum verified."
 # release assets use the same four-member root layout; anything outside that
 # closed set is a release-integrity failure, not a sidecar to ignore.
 if [ "$OS" = "windows" ]; then
-    ARCHIVE_BINARY="codebase-memory-mcp.exe"
+    ARCHIVE_BINARY="dx-codebase.exe"
     ARCHIVE_INSTALLER="install.ps1"
 else
-    ARCHIVE_BINARY="codebase-memory-mcp"
+    ARCHIVE_BINARY="dx-codebase"
     ARCHIVE_INSTALLER="install.sh"
 fi
 ARCHIVE_MEMBERS_FILE="$DLDIR/archive-members.txt"

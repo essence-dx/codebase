@@ -28,8 +28,11 @@ Add-Type -AssemblyName System.Net.Http
 $Repo = "essence-dx/codebase"
 $InstallDir = "$env:LOCALAPPDATA\Programs\codebase-memory-mcp"
 $BinName = "codebase-memory-mcp.exe"
+# The member name inside the release archive is the fork's; the name the
+# product is installed under is its own, and the two are not the same thing.
+$ArchiveBinary = "dx-codebase.exe"
 $WindowsArchiveNames = @(
-    $BinName,
+    $ArchiveBinary,
     "LICENSE",
     "install.ps1",
     "THIRD_PARTY_NOTICES.md"
@@ -331,9 +334,9 @@ try {
 Write-Host "Extracting..."
 Expand-Archive -Path "$TmpDir\$Archive" -DestinationPath $TmpDir -Force
 
-$DownloadedBinary = Join-Path $TmpDir $BinName
+$DownloadedBinary = Join-Path $TmpDir $ArchiveBinary
 if (-not (Test-Path -LiteralPath $DownloadedBinary -PathType Leaf)) {
-    Write-Host "error: $BinName not found after extraction" -ForegroundColor Red
+    Write-Host "error: $ArchiveBinary not found after extraction" -ForegroundColor Red
     Remove-Item -Recurse -Force $TmpDir
     exit 1
 }

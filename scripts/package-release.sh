@@ -36,8 +36,8 @@ Targets are the eight existing release products:
   windows/{amd64,arm64}
 
 Archive contents — one executable, no sidecars:
-  unix:    codebase-memory-mcp LICENSE install.sh THIRD_PARTY_NOTICES.md (.tar.gz)
-  windows: codebase-memory-mcp.exe LICENSE install.ps1 THIRD_PARTY_NOTICES.md (.zip)
+  unix:    dx-codebase LICENSE install.sh THIRD_PARTY_NOTICES.md (.tar.gz)
+  windows: dx-codebase.exe LICENSE install.ps1 THIRD_PARTY_NOTICES.md (.zip)
 
 MCPB bundle (.mcpb): every darwin/windows target and static linux target.
 The executable member in every produced container is verified against
@@ -251,7 +251,7 @@ if [ "$GOOS" = "windows" ]; then
     (
         cd "$PACK_DIR"
         zip -q -X "$ARCHIVE_TMP" \
-            codebase-memory-mcp.exe LICENSE install.ps1 THIRD_PARTY_NOTICES.md
+            dx-codebase.exe LICENSE install.ps1 THIRD_PARTY_NOTICES.md
     )
     mkdir "$VERIFY_DIR/archive"
     extract_zip_member "$ARCHIVE_TMP" "$STAGED_BINARY_NAME" \
@@ -260,7 +260,7 @@ else
     # BSD tar otherwise materializes macOS extended attributes as hidden
     # AppleDouble `._*` members, violating the exact four-file inventory.
     COPYFILE_DISABLE=1 tar -czf "$ARCHIVE_TMP" -C "$PACK_DIR" \
-        codebase-memory-mcp LICENSE install.sh THIRD_PARTY_NOTICES.md
+        dx-codebase LICENSE install.sh THIRD_PARTY_NOTICES.md
     mkdir "$VERIFY_DIR/archive"
     tar -xzf "$ARCHIVE_TMP" -C "$VERIFY_DIR/archive" "$STAGED_BINARY_NAME"
 fi

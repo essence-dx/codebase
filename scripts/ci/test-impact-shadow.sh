@@ -93,7 +93,7 @@ if [ -n "$FETCH_DIR" ]; then
         --pattern checksums.txt --dir "$FETCH_DIR" --clobber
     grep " $asset\$" "$FETCH_DIR/checksums.txt" >"$FETCH_DIR/asset.sha256"
     (cd "$FETCH_DIR" && sha256_check asset.sha256)
-    tar -xzf "$FETCH_DIR/$asset" -C "$FETCH_DIR" codebase-memory-mcp
+    tar -xzf "$FETCH_DIR/$asset" -C "$FETCH_DIR" dx-codebase
     echo "release binary: $FETCH_DIR/dx-codebase ($asset, SHA-256 verified)"
     exit 0
 fi

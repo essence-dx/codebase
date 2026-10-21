@@ -3823,15 +3823,15 @@ echo "OK 12c: checksum verified"
 echo "--- Phase 12d: extraction ---"
 (cd "$DL_DIR" && if [ "$DL_EXT" = "zip" ]; then unzip -q "$DL_ARCHIVE"; else tar -xzf "$DL_ARCHIVE"; fi)
 if [ "$DL_OS" = "windows" ]; then
-  DL_BIN="$DL_DIR/codebase-memory-mcp.exe"
+  DL_BIN="$DL_DIR/dx-codebase.exe"
   # ONE binary per platform: a second executable in the archive would mean the
   # AV-flagged launcher/payload split came back.
-  if [ -e "$DL_DIR/codebase-memory-mcp.payload.exe" ]; then
+  if [ -e "$DL_DIR/dx-codebase.payload.exe" ]; then
     echo "FAIL 12d: Windows archive still ships a launcher/payload pair"
     exit 1
   fi
 else
-  DL_BIN="$DL_DIR/codebase-memory-mcp"
+  DL_BIN="$DL_DIR/dx-codebase"
 fi
 if [ ! -f "$DL_BIN" ]; then
   echo "FAIL 12d: binary not found after extraction"
