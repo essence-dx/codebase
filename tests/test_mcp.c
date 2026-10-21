@@ -25116,11 +25116,19 @@ TEST(dx_verify_looks_its_subject_up_in_the_session_project) {
     if (!strstr(result, "unverifiable")) {
         printf("  [the verify answer was] %s\n", result);
     }
-    /* A verdict, not an error: the lookup ran, and the graph does not know
-     * the subject. */
-    ASSERT_TRUE(strstr(result, "unverifiable") != NULL);
-    ASSERT_NULL(strstr(result, "could not be looked up"));
-    ASSERT_NULL(strstr(result, "refuted"));
+    /* The VERDICT is a field, not a phrase somewhere in the text. The reason
+     * for an unresolved claim legitimately says the claim is "neither
+     * confirmed nor refuted", so a substring check on the whole answer would
+     * match a word that means the opposite of what it is looking for - and
+     * did, which is how this test caught itself. */
+    yyjson_doc *doc = yyjson_read(result, strlen(result), 0);
+    ASSERT_NOT_NULL(doc);
+    yyjson_val *structured = yyjson_obj_get(yyjson_doc_get_root(doc), "structuredContent");
+    ASSERT_TRUE(yyjson_is_obj(structured));
+    const char *verdict = yyjson_get_str(yyjson_obj_get(structured, "verdict"));
+    ASSERT_NOT_NULL(verdict);
+    ASSERT_STR_EQ(verdict, "unverifiable");
+    yyjson_doc_free(doc);
     free(result);
 
     (void)cbm_rmdir(root);
@@ -25163,6 +25171,9 @@ TEST(dx_the_instructions_describe_each_type_the_way_the_contract_does) {
         ASSERT_TRUE(purpose != NULL && purpose[0] != '\0');
         char needle[256];
         snprintf(needle, sizeof(needle), "%s (%s)", name, purpose);
+        if (!strstr(text, needle)) {
+            printf("  [the instructions do not contain] %s\n", needle);
+        }
         ASSERT_TRUE(strstr(text, needle) != NULL);
     }
     yyjson_doc_free(doc);
@@ -25228,8 +25239,15 @@ TEST(dx_verify_reports_a_failed_lookup_as_an_error_not_a_verdict) {
         printf("  [the verify answer was] %s\n", result);
     }
     ASSERT_TRUE(strstr(result, "could not be looked up") != NULL);
-    ASSERT_NULL(strstr(result, "unverifiable"));
-    ASSERT_NULL(strstr(result, "refuted"));
+    /* An ERROR, not a verdict: the structured content has no verdict at all,
+     * it has an error. */
+    yyjson_doc *doc = yyjson_read(result, strlen(result), 0);
+    ASSERT_NOT_NULL(doc);
+    yyjson_val *structured = yyjson_obj_get(yyjson_doc_get_root(doc), "structuredContent");
+    ASSERT_TRUE(yyjson_is_obj(structured));
+    ASSERT_NULL(yyjson_obj_get(structured, "verdict"));
+    ASSERT_TRUE(yyjson_obj_get(structured, "error") != NULL);
+    yyjson_doc_free(doc);
     free(result);
 
     (void)cbm_rmdir(root);
