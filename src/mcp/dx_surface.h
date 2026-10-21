@@ -127,6 +127,11 @@ const char *dx_surface_type_required_fields(dx_request_type_t type);
  * server instructions are built from. */
 const char *dx_surface_type_purpose(dx_request_type_t type);
 
+/* Is this result an ERROR rather than an answer? The base marks a failure
+ * with "isError": true and a structured content that carries an "error"
+ * and no payload. */
+bool dx_surface_result_is_error(const char *json);
+
 /* Fill the project into a parsed request's forwarded arguments when the
  * request did not name one, taking it from the session.
  *

@@ -922,6 +922,37 @@ char *dx_surface_shape_json(const dx_answer_shape_t *shape) {
     return out;
 }
 
+/* Is this result an ERROR rather than an answer?
+ *
+ * The base's error shape is a tool result with "isError": true, and a
+ * "structuredContent" that carries an "error" and no payload. The DX layer
+ * has to be able to tell the two apart, because they are answered
+ * differently: an answer is the budget's business, and a failure is not. */
+bool dx_surface_result_is_error(const char *json) {
+    if (!json) {
+        return false;
+    }
+    yyjson_doc *doc = yyjson_read(json, strlen(json), 0);
+    if (!doc) {
+        return false;
+    }
+    bool is_error = false;
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    if (yyjson_is_obj(root)) {
+        yyjson_val *flag = yyjson_obj_get(root, "isError");
+        if (yyjson_is_true(flag)) {
+            is_error = true;
+        } else {
+            yyjson_val *sc = yyjson_obj_get(root, "structuredContent");
+            if (yyjson_is_obj(sc) && yyjson_obj_get(sc, "error")) {
+                is_error = true;
+            }
+        }
+    }
+    yyjson_doc_free(doc);
+    return is_error;
+}
+
 char *dx_surface_apply_budget(const char *result_json, const dx_surface_request_t *req,
                                dx_answer_shape_t *shape) {
     if (!shape) {
@@ -940,7 +971,16 @@ char *dx_surface_apply_budget(const char *result_json, const dx_surface_request_
     shape->tokens = dx_surface_estimate_tokens(result_json);
     shape->bodies_included = dx_surface_count_bodies(result_json);
 
-    if (shape->budget > 0 && shape->tokens > shape->budget) {
+    /* The budget applies to ANSWERS, not to failures.
+     *
+     * A failure the agent needs to read - "the project is not indexed", "no
+     * such symbol" - must not be replaced by a message about the budget.
+     * That would hide the actual problem behind a size complaint, and the
+     * agent would be left with a complaint about tokens and no idea what
+     * went wrong. The shape is still reported honestly: an error costs
+     * tokens too. */
+    if (!dx_surface_result_is_error(result_json) && shape->budget > 0 &&
+        shape->tokens > shape->budget) {
         shape->over_budget = true;
         shape->excess = shape->tokens - shape->budget;
         /* A refusal, not a truncation. An answer that silently lost rows reads

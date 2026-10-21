@@ -1240,6 +1240,61 @@ TEST(dx_the_schema_documents_the_answer_policy) {
     PASS();
 }
 
+TEST(dx_the_budget_never_replaces_a_failure_with_a_size_complaint) {
+    /* The budget applies to ANSWERS, not to failures. A failure the agent
+     * needs to read - "the project is not indexed", "no such symbol" - must
+     * not be replaced by a message about the budget: that hides the actual
+     * problem behind a size complaint, and the agent is left with a
+     * complaint about tokens and no idea what went wrong. */
+    const char *failure =
+        "{\"content\":[{\"type\":\"text\",\"text\":\"project not indexed\"}],"
+        "\"structuredContent\":{\"error\":\"project not indexed\"},"
+        "\"isError\":true}";
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\",\"max_tokens\":1}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), 0);
+
+    dx_answer_shape_t shape;
+    char *out = dx_surface_apply_budget(failure, &req, &shape);
+    ASSERT_NOT_NULL(out);
+    ASSERT_TRUE(strstr(out, "project not indexed") != NULL);
+    ASSERT_NULL(strstr(out, "refused rather than truncated"));
+    /* The shape still reports the truth: a failure costs tokens too, and it
+     * was not over budget - it was not an answer to measure. */
+    ASSERT_FALSE(shape.over_budget);
+    ASSERT_TRUE(shape.tokens > 0);
+    free(out);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_an_answer_over_the_budget_is_still_refused) {
+    /* The other half: the gate still closes for an answer. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\",\"max_tokens\":1}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), 0);
+
+    const char *answer =
+        "{\"content\":[{\"type\":\"text\",\"text\":\"a rather long answer that will not fit in a "
+        "one token budget at all\"}],"
+        "\"structuredContent\":{\"rows\":[]},\"isError\":false}";
+    dx_answer_shape_t shape;
+    char *out = dx_surface_apply_budget(answer, &req, &shape);
+    ASSERT_NOT_NULL(out);
+    ASSERT_TRUE(shape.over_budget);
+    ASSERT_TRUE(shape.excess > 0);
+    ASSERT_TRUE(strstr(out, "refused rather than truncated") != NULL);
+    free(out);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
 SUITE(dx_surface) {
     RUN_TEST(dx_envelope_with_all_four_fields_parses);
     RUN_TEST(dx_missing_question_is_rejected);
@@ -1305,4 +1360,6 @@ SUITE(dx_surface) {
     RUN_TEST(dx_the_escape_audit_does_not_claim_the_graph_was_consulted);
     RUN_TEST(dx_the_graph_audit_still_claims_the_graph_was_consulted);
     RUN_TEST(dx_the_schema_documents_the_answer_policy);
+    RUN_TEST(dx_the_budget_never_replaces_a_failure_with_a_size_complaint);
+    RUN_TEST(dx_an_answer_over_the_budget_is_still_refused);
 }

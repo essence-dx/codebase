@@ -21016,30 +21016,6 @@ static char *dx_gov_args(const char *const *keys, const char *const *values, int
 
 /* Did the base refuse or fail? An error result is not the same thing as
  * "not found", and the two have to be told apart. */
-static bool dx_gov_result_is_error(const char *json) {
-    if (!json) {
-        return false;
-    }
-    yyjson_doc *doc = yyjson_read(json, strlen(json), 0);
-    if (!doc) {
-        return false;
-    }
-    bool is_error = false;
-    yyjson_val *root = yyjson_doc_get_root(doc);
-    if (yyjson_is_obj(root)) {
-        yyjson_val *flag = yyjson_obj_get(root, "isError");
-        if (yyjson_is_true(flag)) {
-            is_error = true;
-        } else {
-            yyjson_val *sc = yyjson_obj_get(root, "structuredContent");
-            if (yyjson_is_obj(sc) && yyjson_obj_get(sc, "error")) {
-                is_error = true;
-            }
-        }
-    }
-    yyjson_doc_free(doc);
-    return is_error;
-}
 
 /* Did the snippet lookup fail, as opposed to finding nothing?
  *
@@ -21055,7 +21031,7 @@ static bool dx_gov_result_is_error(const char *json) {
  * rather than by a loose "not found" substring that would also match
  * "project not found". */
 static bool dx_gov_snippet_lookup_failed(const char *json) {
-    if (!dx_gov_result_is_error(json)) {
+    if (!dx_surface_result_is_error(json)) {
         return false;
     }
     char *err = dx_gov_str_dup(json, "error");
