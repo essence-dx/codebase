@@ -102,7 +102,7 @@ points at it.
 
 ## P1 - Make the fork beat both evaluated upstreams
 
-### CB-05 - One tool, typed, with CoT-compliance - **IN PROGRESS (M1)**
+### CB-05 - One tool, typed, with CoT-compliance - **SHIPPED, in a built binary**
 
 **Evidence.** The base ships 17 MCP tools and a Cypher query dialect. A
 measured autopsy of the base and its two competitors (`ttsc`, 2026-06-30) found
@@ -127,6 +127,26 @@ tool.
 
 The rule that makes it work: *"free prose can hide a skipped step; a typed
 submission cannot."*
+
+**Status 2026-10-21 - DONE, and verified in a built binary.** The surface is
+built, the `dx` profile exposes exactly one tool, and the whole contract is
+exercised end to end over real stdio against `build/c/codebase-memory-mcp.exe`.
+The receipt is in `CHANGELOG.md` under *"the DX profile could not start the
+server at all"*.
+
+**What that verification found, and what it changed.** The first version of
+this surface **could not start the server at all** - the profile's enum value
+was outside the range the daemon's context handshake accepted, so
+`--tool-profile=dx` exited with code 1 and answered zero requests. Every
+feature in this repository was unreachable in the product while every unit
+test passed. The bound is now written against a name that means what it says
+(`CBM_MCP_TOOL_PROFILE_LAST`), the enum's shape is pinned by compile-time
+assertions, and the DX profile has its own server instructions - it was
+defaulting to text describing a seventeen-tool menu it could not call.
+
+**What is still open.** `CB-21`: the profile is opt-in, so a user who installs
+this fork and runs it still gets upstream's menu. The surface is built; making
+it the default is the product decision that remains.
 
 **Specification.** [`dx/F1-SURFACE.md`](dx/F1-SURFACE.md).
 
