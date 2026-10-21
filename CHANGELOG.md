@@ -19,6 +19,64 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `feat:` the fork's release assets are `dx-codebase`
+
+The hub's contract (`G:\Dx\AGENTS.md`) is `dx-<tool>-<target-triple>`, and
+`essence-dx/media` v1.0.0 is the proof: `dx-media-x86_64-unknown-linux-gnu`,
+`dx-media-x86_64-pc-windows-msvc.exe`. This fork published under upstream's
+names, so the hub could not install it - and a fork that publishes to
+`codebase-memory-mcp` on npm is not a fork, it is a typosquat.
+
+**Three chains, each self-consistent.** The mistake to avoid is renaming
+everything at once: the asset name, the member name and the installed name are
+different things, and only the first two are the hub's to decide.
+
+| Chain | The name | Where it ends |
+| --- | --- | --- |
+| The published asset | `dx-codebase-<os>-<arch>` | the archive the hub's installer downloads |
+| The archive member | `dx-codebase` | the executable inside that archive |
+| The installed name | `codebase-memory-mcp` | the name the product is installed under, and the key its own CLI writes into the user's MCP config |
+
+The third is the product's identity, in **344 places in `src/`**, and it is not
+the hub's to change. So the fork ships the hub's names for the two things the
+hub names, and keeps its own for the one thing the hub does not.
+
+**Nothing in the pipeline publishes under upstream's names any more.** The
+npm, PyPI and MCP Registry publish steps, the legacy-alias publisher, and the
+homebrew installation test are each behind `if: false` with the reason in the
+file. The registry name for the fork is **still open** - `TODO.md` `CB-23` -
+and it is a decision, not a mechanical change.
+
+The split is single-point in each installer, which is where it belongs:
+
+```
+install.sh     ARCHIVE_BINARY="dx-codebase"                  the member
+               DEST="$INSTALL_DIR/codebase-memory-mcp"       the install
+
+install.ps1   $ArchiveBinary = "dx-codebase.exe"             the member
+              $BinName = "codebase-memory-mcp.exe"            the install
+```
+
+`install.ps1` used one variable for both, which is exactly the coupling that
+makes a rename either total or broken; it is two now.
+
+**Executed.** A checker walks all three chains and asserts each agrees end to
+end and that none has crossed:
+
+| Check | Result |
+| --- | --- |
+| The three chains, coupled names | **70 checked, all agreeing** |
+| The three changed workflows | parse as YAML |
+| The eight changed shell scripts | pass `bash -n` |
+| The four changed Python scripts | compile |
+| `server.json` | parses as JSON |
+| `install.ps1` | parses as PowerShell |
+
+**Not run here.** `scripts/smoke-test.sh`, which needs a Linux or macOS host
+with a toolchain, and the release pipeline itself, which needs GitHub Actions.
+The base commit cannot build on this toolchain, so the pipeline's own gates
+are unverified on this machine.
+
 ### 2026-10-21 - `fix:` a required field of three spaces, and two silent downgrades
 
 **Found by an adversarial probe rather than by reading.** The three DX policy
