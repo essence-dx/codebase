@@ -600,6 +600,47 @@ twice.
 only tool without the user passing a flag, and `--tool-profile=all` still
 presents the upstream menu.
 
+### CB-22 - The house test suite on Windows: what passes, what fails, and what is not yet proved
+
+**Status 2026-10-21 - the suite runs to completion here for the first time.**
+`make -f Makefile.cbm SANITIZE= build/c/test-runner` links, and the runner
+executes all **194** suites. The result on this machine (MinGW 16.1, no
+sanitizer runtime, so `SANITIZE=`):
+
+```
+8644 passed, 1005 failed, 94 skipped
+```
+
+**The DX suites are clean inside the house runner** - `dx_surface`,
+`dx_governance` and `dx_memory`, **89 passed, exit 0** - which is the claim
+`CB-20` was waiting on.
+
+**Three of the 1005 failures were this fork's**, and they are fixed: the DX
+tool in the registry changed the `tools/list` payload for every profile, and
+upstream's `mcp` tests pin that payload three ways (a byte budget, the tool
+count, the alwaysLoad set). The DX surface now belongs to the DX profile
+alone, so the upstream profiles' contracts are exactly as upstream wrote them.
+
+**The rest are in code this fork has not modified**, and they fall into two
+groups:
+
+| Group | Suites | Failure count | What it is |
+| --- | --- | --- | --- |
+| Grammar / LSP probes | `lsp_resolution_probe`, `grammar_probe_a`..`g`, `edge_imports`, `edge_structural`, `edge_types_probe`, `matrix_known_classes`, `matrix_new_constructs`, `node_creation_probe`, `convergence_probe` | the bulk | cross-file call resolution across the 162 grammars - `[LRP] go/S1/crossfile_call FAIL calls=0 expected>=1`. A subsystem this fork never touched. |
+| Windows-platform suites | `version_cohort` (15), `runtime_settings` (14), `daemon_bootstrap` (11), `private_file_lock` (6), `cli` (4), `daemon_version` (2), `test_impact_git` (2), and one each in `httpd`, `mem`, `project_lock`, `sqlite_writer`, `system_info` | 44 | Windows service, config-path and file-lock behaviour. Upstream's Windows releases are **MSVC** builds; this toolchain is MinGW, which upstream does not build with. |
+
+**What is NOT proved.** That the remaining 1002 failures predate this fork.
+The reasoning is that they are in files and subsystems this fork has not
+modified, and that three failures which **were** this fork's were found and
+fixed in exactly this way - but reasoning is not a bisect. **The honest next
+step is a run of the same suite on the base commit `3457b21b`**, with the same
+toolchain and the same flags, and a diff of the two failure sets. That is a
+twenty-minute rebuild and one run.
+
+**Done when.** The base commit's failure set is measured on this toolchain, the
+two sets are diffed, and every remaining failure is either attributed or
+fixed.
+
 ---
 
 MIT OR Apache-2.0
