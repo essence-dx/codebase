@@ -25073,6 +25073,11 @@ TEST(dx_verify_resolves_its_subject_in_the_session_project) {
      * failed to ask", and only the first one is honest. */
     cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
     ASSERT_NOT_NULL(srv);
+    /* The DX surface is exposed by the DX profile ALONE, so the test has to
+     * select it. Without this the call is refused by the profile gate and the
+     * test never reaches the verify handler at all - which is exactly what
+     * happened the first three times this test was run. */
+    cbm_mcp_server_set_tool_profile(srv, CBM_MCP_TOOL_PROFILE_DX);
 
     char root[512];
     snprintf(root, sizeof(root), "%s/cbm-dx-verify-XXXXXX", cbm_tmpdir());
@@ -25087,6 +25092,14 @@ TEST(dx_verify_resolves_its_subject_in_the_session_project) {
     ASSERT_NOT_NULL(store);
     ASSERT_EQ(cbm_store_upsert_project(store, project, cbm_tmpdir()), CBM_STORE_OK);
     cbm_mcp_server_set_project(srv, project);
+    /* The snippet lookup checks that the project is indexed IN THE STORE IT
+     * OPENS, and set_project may have switched the server to a different
+     * store. So the project row goes in again, in whichever store the server
+     * is now using, or the lookup refuses before it ever looks for the
+     * symbol. */
+    store = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(store);
+    ASSERT_EQ(cbm_store_upsert_project(store, project, cbm_tmpdir()), CBM_STORE_OK);
     /* The snippet lookup reads the file, so the fixture needs one. */
     char file_path[512];
     snprintf(file_path, sizeof(file_path), "%s/target.c", cbm_tmpdir());
@@ -25109,6 +25122,11 @@ TEST(dx_verify_resolves_its_subject_in_the_session_project) {
         "\"request\":{\"type\":\"verify\",\"claim\":\"pkg.target_fn exists\","
         "\"subject\":\"pkg.target_fn\"}}");
     ASSERT_NOT_NULL(result);
+    /* A failing assertion that does not show what came back is a test that
+     * costs a build cycle to diagnose. Print it. */
+    if (!strstr(result, "confirmed")) {
+        printf("  [the verify answer was] %s\n", result);
+    }
     ASSERT_TRUE(strstr(result, "confirmed") != NULL);
     ASSERT_NULL(strstr(result, "unverifiable"));
     free(result);
@@ -25124,6 +25142,11 @@ TEST(dx_verify_reports_unverifiable_for_a_subject_the_graph_does_not_have) {
      * that the claim is false. */
     cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
     ASSERT_NOT_NULL(srv);
+    /* The DX surface is exposed by the DX profile ALONE, so the test has to
+     * select it. Without this the call is refused by the profile gate and the
+     * test never reaches the verify handler at all - which is exactly what
+     * happened the first three times this test was run. */
+    cbm_mcp_server_set_tool_profile(srv, CBM_MCP_TOOL_PROFILE_DX);
 
     char root[512];
     snprintf(root, sizeof(root), "%s/cbm-dx-verify-missing-XXXXXX", cbm_tmpdir());
@@ -25136,6 +25159,14 @@ TEST(dx_verify_reports_unverifiable_for_a_subject_the_graph_does_not_have) {
     ASSERT_NOT_NULL(store);
     ASSERT_EQ(cbm_store_upsert_project(store, project, cbm_tmpdir()), CBM_STORE_OK);
     cbm_mcp_server_set_project(srv, project);
+    /* The snippet lookup checks that the project is indexed IN THE STORE IT
+     * OPENS, and set_project may have switched the server to a different
+     * store. So the project row goes in again, in whichever store the server
+     * is now using, or the lookup refuses before it ever looks for the
+     * symbol. */
+    store = cbm_mcp_server_store(srv);
+    ASSERT_NOT_NULL(store);
+    ASSERT_EQ(cbm_store_upsert_project(store, project, cbm_tmpdir()), CBM_STORE_OK);
     /* A file for the lookup to read: the subject is absent from the GRAPH, not
      * from the disk. A subject that cannot be looked up is a failed lookup,
      * not an unverifiable claim, and the two must not be confused. */
@@ -25150,6 +25181,9 @@ TEST(dx_verify_reports_unverifiable_for_a_subject_the_graph_does_not_have) {
         "\"request\":{\"type\":\"verify\",\"claim\":\"a claim about nothing\","
         "\"subject\":\"pkg.not_in_the_graph\"}}");
     ASSERT_NOT_NULL(result);
+    if (!strstr(result, "unverifiable")) {
+        printf("  [the verify answer was] %s\n", result);
+    }
     ASSERT_TRUE(strstr(result, "unverifiable") != NULL);
     ASSERT_NULL(strstr(result, "refuted"));
     free(result);
@@ -25228,6 +25262,43 @@ TEST(dx_the_specification_table_and_the_code_agree) {
         snprintf(needle, sizeof(needle), "| `%s` | %s |", name, purpose);
         ASSERT_TRUE(strstr(text, needle) != NULL);
     }
+    PASS();
+}
+
+TEST(dx_verify_reports_a_failed_lookup_as_an_error_not_a_verdict) {
+    /* The contract reserves "unverifiable" for "the graph was asked and does
+     * not know". A lookup that FAILED - here the project is not indexed - is
+     * a different answer, and reporting it as a verdict would be the tool
+     * failing to ask the right question and then reporting a confident answer
+     * about it. */
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_mcp_server_set_tool_profile(srv, CBM_MCP_TOOL_PROFILE_DX);
+
+    char root[512];
+    snprintf(root, sizeof(root), "%s/cbm-dx-verify-noindex-XXXXXX", cbm_tmpdir());
+    ASSERT_TRUE(cbm_mkdtemp(root) != NULL);
+    ASSERT_TRUE(cbm_mcp_server_set_session_context(srv, root, NULL));
+
+    /* Deliberately NO project is upserted: the lookup cannot succeed, and
+     * the answer must say so rather than pretend the graph was asked. */
+    char *result = cbm_mcp_handle_tool(
+        srv, "dx_codebase",
+        "{\"question\":\"does it exist\",\"draft\":{\"reason\":\"r\",\"type\":\"verify\"},"
+        "\"review\":\"v\","
+        "\"request\":{\"type\":\"verify\",\"claim\":\"a claim\",\"subject\":\"pkg.thing\"}}");
+    ASSERT_NOT_NULL(result);
+    if (strstr(result, "unverifiable")) {
+        printf("  [the verify answer was] %s\n", result);
+    }
+    ASSERT_NULL(strstr(result, "unverifiable"));
+    ASSERT_NULL(strstr(result, "refuted"));
+    /* And it says what actually happened. */
+    ASSERT_TRUE(strstr(result, "could not be looked up") != NULL);
+    free(result);
+
+    (void)cbm_rmdir(root);
+    cbm_mcp_server_free(srv);
     PASS();
 }
 
@@ -25738,6 +25809,7 @@ SUITE(mcp) {
     RUN_TEST(dx_profile_does_not_open_the_http_surface);
     RUN_TEST(dx_profile_advertises_exactly_one_tool);
     RUN_TEST(dx_verify_resolves_its_subject_in_the_session_project);
+    RUN_TEST(dx_verify_reports_a_failed_lookup_as_an_error_not_a_verdict);
     RUN_TEST(dx_verify_reports_unverifiable_for_a_subject_the_graph_does_not_have);
     RUN_TEST(dx_the_specification_table_and_the_code_agree);
     RUN_TEST(dx_the_instructions_describe_each_type_the_way_the_contract_does);
