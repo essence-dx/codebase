@@ -19,6 +19,45 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `docs:` a correction, and what the diagnostic cost
+
+**A correction to the receipt for the verify fix.** The RED run was
+**confounded**, and the record should say so.
+
+The RED was reported as: *"without the fix, a `verify` request produces neither
+'confirmed' nor 'unverifiable' - it produces an error."* The symptom was right
+and the **cause** was wrong. The error was:
+
+```
+tool 'dx_codebase' is not available in the all tool profile
+```
+
+The tests' server was on the **ALL** profile, and the DX surface is exposed by
+the DX profile **alone** - which is the fix that kept upstream's tool count,
+byte budget and alwaysLoad contracts intact. So the call was refused by the
+profile gate and the verify handler was **never reached**. Three separate
+diagnoses of that failure - the missing project, the missing file, the wrong
+store - were all red herrings.
+
+**The RED receipt therefore did not demonstrate what it was said to
+demonstrate**, and the clean RED/GREEN has to be re-run with the corrected
+fixture.
+
+**What made it findable: a failing assertion that shows what came back.** The
+two verify tests now print the answer they got. That is worth doing in its own
+right - a test that cannot be diagnosed without a build cycle is a test that
+costs a build cycle every time it fails - and it is what turned "it fails"
+into "it fails because the profile gate refused the call".
+
+**The test that actually proves the lookup separation**, added here:
+
+`dx_verify_reports_a_failed_lookup_as_an_error_not_a_verdict` - a `verify`
+request whose project is **not indexed**. The lookup fails, and the answer
+must be an error saying so - not `unverifiable`, and not `refuted`. That is
+the case the separation between "the graph was asked and does not know" and
+"I could not look it up" exists for, and it is the test that shows the
+separation working, rather than a test that only shows the happy path.
+
 ### 2026-10-21 - `fix:` three ways the surface answered without being asked
 
 **Three defects, all of the same family: the tool answered a question the
