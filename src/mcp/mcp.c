@@ -8,6 +8,7 @@
 // operations
 
 #include "foundation/constants.h"
+#include "mcp/dx_surface.h"
 
 enum {
     MCP_FIELD_SIZE = 1040,
@@ -869,9 +870,29 @@ static const tool_def_t TOOLS[] = {
      "\"description\":\"Run identity, e.g. 'pytest 2026-08-27' (default 'unlabeled'); counts "
      "accumulate per label and whole runs age out together\"},\"project\":{\"type\":"
      "\"string\"}},\"required\":[\"traces\",\"project\"]}"},
+
+    {"dx_codebase",
+     "The DX surface over the code graph: one tool. The envelope is not optional - "
+     "question, draft, review and request are all required, and request.type selects "
+     "the graph operation. draft.type is the type you first considered and review is "
+     "where you correct it, so a wrong or too broad plan is fixed before it is "
+     "committed. Use escape when the question is not a graph question. The response "
+     "carries an audit of what was checked and a next step.",
+     NULL},
 };
 
 static const int TOOL_COUNT = sizeof(TOOLS) / sizeof(TOOLS[0]);
+
+/* The DX surface's schema is built from its request-type table, so it cannot
+ * be a compile-time literal here without the two drifting apart. It lives
+ * beside the table in src/mcp/dx_surface.c, and the schema/table agreement is
+ * pinned by tests/test_dx_surface.c. */
+static const char *mcp_tool_input_schema_for(int i) {
+    if (strcmp(TOOLS[i].name, "dx_codebase") == 0) {
+        return dx_surface_tool_schema();
+    }
+    return TOOLS[i].input_schema;
+}
 
 typedef struct {
     const char *name;
@@ -921,6 +942,7 @@ static const tool_annotation_def_t TOOL_ANNOTATIONS[] = {
     {"detect_changes", true, false, true, false, false},
     {"manage_adr", false, true, false, false, false},
     {"ingest_traces", false, true, false, false, false},
+    {"dx_codebase", true, false, true, false, true},
 };
 
 static const tool_annotation_def_t *mcp_tool_annotations(const char *name) {
@@ -953,7 +975,7 @@ static void mcp_add_tool_def(yyjson_mut_doc *doc, yyjson_mut_val *tools, int i) 
      * discovery cost and retain the behavioral description instead. */
     yyjson_mut_obj_add_str(doc, tool, "description", TOOLS[i].description);
 
-    mcp_add_json_schema(doc, tool, "inputSchema", TOOLS[i].input_schema);
+    mcp_add_json_schema(doc, tool, "inputSchema", mcp_tool_input_schema_for(i));
     /* Deliberately NO outputSchema. Tool output is format-parameter-polymorphic
      * (tree text by default, a JSON object under format:"json"), so no static
      * schema is truthful — and a declared schema makes spec-honoring clients
@@ -996,6 +1018,12 @@ static bool mcp_tool_allowed(cbm_mcp_tool_profile_t profile, const char *name) {
     if (profile == CBM_MCP_TOOL_PROFILE_ALL) {
         return true;
     }
+    /* The DX surface: exactly one tool. The whole point is that the agent has
+     * one thing to reach for and a schema that forces the reasoning, instead
+     * of a menu it never navigates. See dx/F1-SURFACE.md. */
+    if (profile == CBM_MCP_TOOL_PROFILE_DX) {
+        return strcmp(name, "dx_codebase") == 0;
+    }
     const char *const *allowed = NULL;
     size_t allowed_count = 0U;
     if (profile == CBM_MCP_TOOL_PROFILE_ANALYSIS) {
@@ -1014,7 +1042,16 @@ static bool mcp_tool_allowed(cbm_mcp_tool_profile_t profile, const char *name) {
 }
 
 static const char *mcp_tool_profile_name(cbm_mcp_tool_profile_t profile) {
-    return profile == CBM_MCP_TOOL_PROFILE_SCOUT ? "scout" : "analysis";
+    if (profile == CBM_MCP_TOOL_PROFILE_SCOUT) {
+        return "scout";
+    }
+    if (profile == CBM_MCP_TOOL_PROFILE_DX) {
+        return "dx";
+    }
+    if (profile == CBM_MCP_TOOL_PROFILE_ANALYSIS) {
+        return "analysis";
+    }
+    return "all";
 }
 
 int cbm_mcp_parse_tool_profile_args(int argc, const char *const argv[const],
@@ -1036,6 +1073,10 @@ int cbm_mcp_parse_tool_profile_args(int argc, const char *const argv[const],
             *profile_out = CBM_MCP_TOOL_PROFILE_SCOUT;
             continue;
         }
+        if (strcmp(arg, "--tool-profile=dx") == 0) {
+            *profile_out = CBM_MCP_TOOL_PROFILE_DX;
+            continue;
+        }
         if (strcmp(arg, "--tool-profile") == 0) {
             if (i + 1 >= argc || !argv[i + 1]) {
                 return -1;
@@ -1044,6 +1085,8 @@ int cbm_mcp_parse_tool_profile_args(int argc, const char *const argv[const],
                 *profile_out = CBM_MCP_TOOL_PROFILE_ANALYSIS;
             } else if (strcmp(argv[i + 1], "scout") == 0) {
                 *profile_out = CBM_MCP_TOOL_PROFILE_SCOUT;
+            } else if (strcmp(argv[i + 1], "dx") == 0) {
+                *profile_out = CBM_MCP_TOOL_PROFILE_DX;
             } else {
                 return -1;
             }
@@ -1131,7 +1174,7 @@ const char *cbm_mcp_tool_input_schema(const char *tool_name) {
     }
     for (int i = 0; i < TOOL_COUNT; i++) {
         if (strcmp(TOOLS[i].name, tool_name) == 0) {
-            return TOOLS[i].input_schema;
+            return mcp_tool_input_schema_for(i);
         }
     }
     return NULL;
@@ -20518,17 +20561,16 @@ release_request:
 
 /* ── Tool dispatch ────────────────────────────────────────────── */
 
-static char *dispatch_tool(cbm_mcp_server_t *srv, const char *tool_name, const char *args_json) {
-    if (!tool_name) {
-        return cbm_mcp_text_result("missing tool name", true);
-    }
-    if (srv && !mcp_tool_allowed(srv->tool_profile, tool_name)) {
-        char message[CBM_SZ_256];
-        snprintf(message, sizeof(message), "tool '%s' is not available in the %s tool profile",
-                 tool_name, mcp_tool_profile_name(srv->tool_profile));
-        return cbm_mcp_text_result(message, true);
-    }
+/* dx_codebase: the DX single-tool surface. Defined after dispatch_tool,
+ * because it dispatches through it. */
+static char *handle_dx_codebase(cbm_mcp_server_t *srv, const char *args_json);
 
+/* The dispatch table itself, with no profile check. The DX surface calls this
+ * for the base tool its committed request selects: the DX profile exposes one
+ * tool to the agent, and the request-type table is the allowlist for what
+ * that one tool may reach. */
+static char *dispatch_tool_inner(cbm_mcp_server_t *srv, const char *tool_name,
+                                 const char *args_json) {
     if (strcmp(tool_name, "list_projects") == 0) {
         return handle_list_projects(srv, args_json);
     }
@@ -20558,6 +20600,9 @@ static char *dispatch_tool(cbm_mcp_server_t *srv, const char *tool_name, const c
     }
     if (strcmp(tool_name, "get_architecture") == 0) {
         return handle_get_architecture(srv, args_json);
+    }
+    if (strcmp(tool_name, "dx_codebase") == 0) {
+        return handle_dx_codebase(srv, args_json);
     }
 
     /* Pipeline-dependent tools */
@@ -20596,6 +20641,8 @@ static bool mcp_tool_reads_in_batch(const char *tool_name) {
         "query_graph",      "trace_path",           "trace_call_path",  "search_graph",
         "get_architecture", "get_graph_schema",     "get_code_snippet", "get_file_outline",
         "compare_graphs",   "check_index_coverage",
+        /* The DX surface dispatches to one of the above, so it reads too. */
+        "dx_codebase",
     };
     for (size_t i = 0; tool_name && i < sizeof(batched) / sizeof(batched[0]); i++) {
         if (strcmp(tool_name, batched[i]) == 0) {
@@ -20625,6 +20672,75 @@ static void release_request_store(cbm_mcp_server_t *srv) {
      * earlier attempt aimed at the CRT heap instead and could not release
      * them. POSIX already purges on free, so this is a no-op there. */
     cbm_mem_collect();
+}
+
+/* The profile gate. Everything an agent calls directly passes through here. */
+static char *dispatch_tool(cbm_mcp_server_t *srv, const char *tool_name, const char *args_json) {
+    if (!tool_name) {
+        return cbm_mcp_text_result("missing tool name", true);
+    }
+    if (srv && !mcp_tool_allowed(srv->tool_profile, tool_name)) {
+        char message[CBM_SZ_256];
+        snprintf(message, sizeof(message), "tool '%s' is not available in the %s tool profile",
+                 tool_name, mcp_tool_profile_name(srv->tool_profile));
+        return cbm_mcp_text_result(message, true);
+    }
+    return dispatch_tool_inner(srv, tool_name, args_json);
+}
+
+/* dx_codebase: the DX single-tool surface.
+ *
+ * The envelope is validated first, and a rejected envelope is an error - never
+ * an answer from a default type. A required field on a typed schema is the one
+ * thing a model cannot skip, which is the whole reason this surface exists.
+ *
+ * The committed request type selects the underlying base tool; the request's
+ * own fields are forwarded verbatim, so this handler owns no per-tool field
+ * mapping and cannot drift from the base tools' schemas.
+ */
+static char *handle_dx_codebase(cbm_mcp_server_t *srv, const char *args_json) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    if (dx_surface_parse(args_json, &req, &err) != 0) {
+        char *result = cbm_mcp_text_result(err ? err : "dx_codebase: the envelope was rejected",
+                                           true);
+        free(err);
+        return result;
+    }
+
+    if (req.request_type == DX_REQ_ESCAPE) {
+        /* Not a graph question. Say so plainly and hand the agent back its own
+         * tools, rather than answering a question the graph cannot answer. */
+        char *audit = dx_surface_audit_text(&req, "no graph query was needed");
+        char *inner = cbm_mcp_text_result(dx_surface_escape_text(), false);
+        char *wrapped = dx_surface_wrap_result(inner, audit, DX_NEXT_ESCAPE,
+                                               "use your own file and search tools");
+        free(inner);
+        free(audit);
+        dx_surface_request_free(&req);
+        return wrapped ? wrapped : cbm_mcp_text_result(dx_surface_escape_text(), false);
+    }
+
+    const char *base_tool = req.base_tool;
+    if (!base_tool) {
+        dx_surface_request_free(&req);
+        return cbm_mcp_text_result("dx_codebase: no tool to dispatch to", true);
+    }
+
+    char *inner = dispatch_tool_inner(srv, base_tool, req.args_json);
+    if (!inner) {
+        dx_surface_request_free(&req);
+        return cbm_mcp_text_result("dx_codebase: the underlying tool returned nothing", true);
+    }
+
+    char *audit = dx_surface_audit_text(&req, "the indexed graph");
+    char *wrapped = dx_surface_wrap_result(inner, audit, DX_NEXT_ANSWER,
+                                           "the answer is complete; read the source it names "
+                                           "if you need more");
+    free(inner);
+    free(audit);
+    dx_surface_request_free(&req);
+    return wrapped ? wrapped : cbm_mcp_text_result("dx_codebase: the result was lost", true);
 }
 
 char *cbm_mcp_handle_tool(cbm_mcp_server_t *srv, const char *tool_name, const char *args_json) {

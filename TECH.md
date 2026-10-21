@@ -91,48 +91,69 @@ These are the reasons this is a DX product rather than a vendored reference. Eac
 one is a `TODO.md` item with a done-when check. None of them exists in the upstream
 base, and none of them exists in the removed candidate.
 
-**1. One tool, three trust tiers, as the response contract.**
-Upstream ships 17 tools with Scout (8) and Analysis (13) profiles
-(`src/mcp/mcp.c:982-1015`). The removed candidate shipped one tool for a measured
-reason. This fork ships **one** MCP tool whose *answer shape* changes by tier:
-`scout` returns names and paths, `verify` returns source plus the call path,
-`auditor` returns the full answer with coverage and confidence. Best of both:
-one tool to pick, three levels of depth to ask for.
+**The plan is [`dx/PLAN.md`](dx/PLAN.md).** The order of work, the measurement
+commitments and the milestone list are there. The first feature's contract is
+[`dx/F1-SURFACE.md`](dx/F1-SURFACE.md).
 
-**2. The org graph, with a DX-native semantic layer.**
-Upstream can link services across repositories
-(`README.md:349`, `README.md:417`). It has no idea what a **DX tool**, a **DX rule**
-or a **DX register row** is. This fork indexes the whole `G:\Dx` tree as one graph
-and adds nodes and edges for the `dx` manifest routes, the `TOOL_REGISTRY` entries,
-the `docs/<tool>.md` register, the `AGENTS.md` rule scopes, and the path-dependency
-web between product folders. The question it answers is the hub's actual question:
-*which repository owns this, which rule governs it, and what breaks if it changes.*
+**0. The finding that sets the order.** The base's graph is good; the base's
+*surface* is what loses. A measured autopsy of all three candidates
+(`ttsc`, 2026-06-30) found `codebase-memory-mcp` spending **66% more tokens
+than running with no MCP server at all** on one grid, `codegraph` 4% more and
+`serena` 130% more, while the compiler-backed `@ttsc/graph` cost **11% of
+baseline**. Their words: *"The graph was right there; the surface buried it."*
+An independent benchmark agrees from the other side - a **thin wrapper** around
+the base was cheaper than the raw server in every setting. So the first
+milestone is the interface, not the index.
 
-**3. Test impact that works on day one, on every DX language.**
-Upstream's Smart CI is honest about its limits: it narrows only C and C++ whose
-tests follow upstream's own conventions, and only with a per-test coverage map you
-must produce yourself - "In any other repository the engine answers 'run everything'."
-That is safe, but it saves nothing. This fork ships language-agnostic test discovery
-(Rust `#[test]`, `#[tokio::test]`, vitest, jest, pytest, `go test`, cargo-nextest)
-and derives the blast radius from the graph alone, across every product folder, with
-no coverage map to build.
+**1. One tool, typed, with CoT-compliance.**
+One MCP tool whose schema carries the reasoning as **required arguments**:
+`question`, `draft{reason,type}`, `review`, `request{type,...}`. The rule that
+makes it work: *"free prose can hide a skipped step; a typed submission
+cannot."* `escape` is a first-class answer for a question that is not a graph
+question, and the response carries an `audit` of what was checked and a `next`
+step. **Landed 2026-10-21** - see `CHANGELOG.md`.
 
-**4. Sufficiency receipts: every answer ships its blind spots.**
-The removed candidate's own `AGENTS.md` states the whole product in one line: an
-agent falls back to `Read`/`Grep` the instant a graph answer is insufficient. That
-makes sufficiency the product, and neither candidate exposed it. This fork returns,
-with every answer: the confidence, what the graph proved, the blind spots
-(unresolved references by reason, documentation link families below their accuracy
-bar, files that were skipped) and the single next question to read if the answer is
-not enough. That is `AGENTS.md` section 4 claim tiers made executable.
+**2. The answer is the index, never the bodies, under a hard budget.**
+Returning whole source bodies is the token bomb: the tool that does it spent
+4% more than doing nothing. The answer should be relationships - names, edges,
+signatures, spans - so its size does not grow with the repository, and the
+budget should be a **gate** that fails with a non-zero exit code, not a warning.
+The base already has the mechanism; it is simply not the default.
 
-**5. Offline two-stage retrieval: embed, then rerank.**
-Upstream bundles `nomic-embed-code` (768d, int8) and scores with 11 signals, but
-it has no reranker - a search for `src/` in the upstream tree finds **zero**
-occurrences of "rerank", "reranker" or "cross-encoder". The removed candidate had no
-embeddings at all, so its retrieval ceiling was lexical. This fork bundles the
-embedder **and** a cross-encoder reranker: hosted-grade search precision with no
-network, no API key and no model download at query time.
+**3. The org graph, with a DX-native semantic layer.**
+Upstream can link services across repositories (`README.md:349`,
+`README.md:417`). It has no idea what a **DX tool**, a **DX rule** or a **DX
+register row** is. This fork indexes the whole `G:\Dx` tree as one graph and
+adds nodes and edges for the `dx` manifest routes, the `TOOL_REGISTRY` entries,
+the `docs/<tool>.md` register, the `AGENTS.md` rule scopes, and the
+path-dependency web between product folders - plus a conflict graph over every
+in-flight branch, pull request and agent task. The question it answers is the
+hub's actual question: *which repository owns this, which rule governs it, and
+what breaks if it changes.*
+
+**4. Governance as verdicts, and test impact that works on day one.**
+Two halves of the same idea: the tool must be able to *refute* as well as
+answer. `verify_claim` returns `confirmed` / `refuted` / `unverifiable` with a
+citation receipt; `certify_public_surface` names the consumers a change breaks;
+the certificate asks whether a diff **opened a new path** into a declared
+boundary. Meanwhile upstream's Smart CI is honest about its limits - it narrows
+only C and C++ whose tests follow upstream's conventions, and only with a
+per-test coverage map you must build yourself, so "in any other repository the
+engine answers 'run everything'." This fork derives the blast radius from the
+graph alone, for Rust, TypeScript and Go, across every product folder, with no
+coverage map - and delivers it as a 20-line skill, because in the one measured
+study of that shape, a 107-line skill cut to 20 lines quadrupled an agent's
+resolution rate while procedural instructions without the targeted context made
+regressions *worse*.
+
+**5. Anchored memory, and a tool that measures itself before you trust it.**
+Every memory carries the hash of what it claims, so a recall reports `valid` /
+`changed` / `gone` instead of a confident stale fact - the base's ADR store
+cannot do that today. And `dx-codebase prove` measures the tool on a repository
+the caller names, offline, with no API key, **including the case where it
+loses**: a competitor publishes its own +43% loss on a small repo and says
+*"Don't guess from our repos - run `openlore prove` on yours."* A tool that
+refuses adoption without a measurement is DX's culture, not a bolt-on.
 
 ---
 
@@ -141,6 +162,8 @@ network, no API key and no model download at query time.
 | Path | What it is | Owner |
 | --- | --- | --- |
 | `src/` | The C backend: MCP server, CLI, daemon, store, pipeline, Cypher, watcher, traces | upstream |
+| `src/mcp/dx_surface.c` | The DX single-tool surface: the envelope, the dispatch table, the response wrapping | **DX** |
+| `dx/` | The plan and the feature contracts | **DX** |
 | `internal/cbm/` | The 162 vendored tree-sitter grammars and the AST extraction engine | upstream |
 | `graph-ui/` | CodeAtlasWeb - the React/Monaco/Three.js frontend behind CBM Lens | upstream |
 | `pkg/` | Installers for npm, PyPI, Go, Homebrew, Scoop, AUR, Chocolatey, winget | upstream |
@@ -196,7 +219,7 @@ a written record.
 | Smart CI and its C/C++ limit | `README.md:355`, `docs/SMART_CI.md` |
 | Team-shared graph artifact | `README.md:419-440` |
 | Source layout | `README.md:1086-1104` |
-| Tool profiles (Scout / Analysis) | `src/mcp/mcp.c:982-1015` |
+| Tool profiles (Scout / Analysis) | `src/mcp/mcp.c:1004-1043` |
 | Semantic embeddings, 11 signals | `src/semantic/semantic.h:1-45` |
 | No reranker in the upstream base | `grep -ri rerank src/` returns nothing |
 | Storage root `~/.cache/codebase-memory-mcp` | `README.md:988` |

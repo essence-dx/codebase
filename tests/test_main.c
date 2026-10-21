@@ -1734,6 +1734,7 @@ extern void suite_store_scope(void);
 extern void suite_store_graph_digest(void);
 extern void suite_graph_mem(void);
 extern void suite_test_impact(void);
+extern void suite_dx_surface(void);
 extern void suite_test_impact_profiles(void);
 extern void suite_test_impact_changes(void);
 extern void suite_test_impact_origins(void);
@@ -2313,6 +2314,9 @@ int main(int argc, char **argv) {
     RUN_SELECTED_SUITE(mcp);
     RUN_SELECTED_SUITE(mcp_mutation_guard);
     RUN_SELECTED_SUITE(index_supervisor);
+
+    /* The DX single-tool surface (DX) */
+    RUN_SELECTED_SUITE(dx_surface);
 
     /* Shared MCP daemon coordination + private framing */
     RUN_SELECTED_SUITE(daemon);

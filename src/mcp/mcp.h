@@ -130,6 +130,9 @@ typedef enum {
      * write, so these are intentionally not named strictly read-only modes. */
     CBM_MCP_TOOL_PROFILE_ANALYSIS = 1,
     CBM_MCP_TOOL_PROFILE_SCOUT = 2,
+    /* The DX surface: exactly one tool, whose schema carries the reasoning as
+     * required arguments. See dx/F1-SURFACE.md. */
+    CBM_MCP_TOOL_PROFILE_DX = 3,
 } cbm_mcp_tool_profile_t;
 
 /* Parse the process-level tool-profile flag. Explicit malformed or unknown

@@ -19,6 +19,77 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `feat:` the DX surface - one typed tool over the code graph
+
+**Milestone M1 of [`dx/PLAN.md`](dx/PLAN.md).** The first DX feature is landed:
+the 17-tool menu is replaced, for DX sessions, by **one tool whose schema makes
+the reasoning a required argument**.
+
+**Why this, and not a new index.** A measured autopsy of the base and its two
+competitors (`ttsc`, 2026-06-30) found that on the GPT-5.6 grid with the `zod`
+repository, `codebase-memory-mcp` spent **66% more tokens than running with no
+MCP server at all** (worst cell +82%), `codegraph` 4% more and `serena` 130%
+more, while the compiler-backed `@ttsc/graph` cost **11% of baseline**. Their
+conclusion: *"In the runs I measured it called the MCP zero times and fell back
+to the shell every time. It gave up and grepped. The graph was right there; the
+surface buried it."* An independent benchmark agrees from the other side - a
+thin wrapper around the base was **cheaper than the raw server in every
+setting** (`nefayran/code-graph-vs-grep`, 2026-10-01, p <= 0.021).
+
+**What was built (DX).**
+
+| File | What it is |
+| --- | --- |
+| `src/mcp/dx_surface.h` | The module's public interface: parse, dispatch target, wrap. |
+| `src/mcp/dx_surface.c` | The implementation. Depends on `yyjson` and the C standard library only - no store, no tree-sitter, no SQLite - so the contract is verifiable without the full build. |
+| `tests/test_dx_surface.c` | 19 contract tests, in the house framework. |
+| `dx/PLAN.md` | The master plan: five features, the order, the measurement commitments. |
+| `dx/F1-SURFACE.md` | This feature's contract: the envelope, the validation rules, the dispatch table, the test matrix. |
+
+The envelope is `question`, `draft{reason,type}`, `review` and
+`request{type,...fields}`. All four are **required**: a missing one is
+rejected at the call boundary, never answered from a default. `request.type` is
+a discriminated union over `search | trace | impact | details | outline |
+architecture | schema | coverage | changes | escape`, and `escape` is a
+first-class no-op for a question that is not a graph question. The request's own
+fields are forwarded **verbatim** to the underlying base tool, so the module
+owns no per-tool field mapping and cannot drift from the base tools' schemas.
+The response gains two fields the base never had: `audit` (what was checked)
+and `next` (answer, inspect, or escape).
+
+**Wiring (DX, in the upstream tree).**
+
+- `src/mcp/mcp.h` - a fourth tool profile, `CBM_MCP_TOOL_PROFILE_DX`, which
+  exposes exactly one tool.
+- `src/mcp/mcp.c` - the `dx_codebase` tool definition, the
+  `handle_dx_codebase` handler, the `dx` branch of the profile filter, the
+  `--tool-profile=dx` flag, and the dispatcher split so the DX surface can
+  reach the base tools the profile does not expose directly. The request-type
+  table is that allowlist: the mutating base tools are not reachable from it.
+- `Makefile.cbm` - `src/mcp/dx_surface.c` in `MCP_SRCS`, `tests/test_dx_surface.c`
+  in `TEST_MCP_SRCS`.
+- `tests/test_main.c` - the suite is declared and run with the rest.
+
+**What was executed, and what was not.**
+
+| Check | Command | Result |
+| --- | --- | --- |
+| The contract compiles clean under the project's flags | `gcc -std=c11 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare` on `src/mcp/dx_surface.c` | exit 0 |
+| The contract tests pass | the same compile plus `tests/test_dx_surface.c`, then the binary | **19 passed, exit 0** |
+| The wiring compiles clean | `gcc -fsyntax-only` with the project's include set on `src/mcp/mcp.c` and `src/mcp/dx_surface.c` | exit 0 |
+| The full server build | `make -f Makefile.cbm test` | **NOT RUN** - the tree-sitter runtime and the 162 vendored grammars are not built in this environment |
+| The suite inside the house test binary | `tests/test_main.c` | **NOT RUN** - same reason |
+
+The standalone compile is not a substitute for the full build, and this entry
+does not claim one. The module was written to depend on nothing but `yyjson`
+precisely so that the contract could be *executed* here; the wiring is
+compile-verified and awaits the full build.
+
+**One real bug the tests caught.** The first version of the schema test looked
+for `request` at the schema root rather than under `properties`, and then for the
+enum one level too shallow. The test failed, the test was wrong, and the test
+now walks a dotted path (`dx_path`) so the mistake cannot recur.
+
 ### 2026-10-21 - `chore:` the fork is established as `essence-dx/codebase`
 
 **The DX layer is created. The upstream base is untouched.**
