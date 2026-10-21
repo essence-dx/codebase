@@ -19,6 +19,47 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `docs:` the naming decision was backwards
+
+**The ledger had the release naming wrong, and the hub's own registry says
+so.** `CB-15` had been asking the hub whether this fork's tool is the
+exception to the `dx-<tool>` convention. The hub already answers it, in the
+place that implements it: `TOOL_REGISTRY` in `cli/src/update_registry.rs`
+carries `dx-<tool>` for **every one** of the fourteen tools that have an
+entry, with the path `bin/dx-<tool>`:
+
+```rust
+("check", "essence-dx/check", "dx-check", "bin/dx-check"),
+("forge", "essence-dx/forge", "dx-forge", "bin/dx-forge"),
+("media", "essence-dx/media", "dx-media", "bin/dx-media"),
+```
+
+`G:\Dx\AGENTS.md` says the same thing in prose: *"Release-asset naming:
+`dx-<tool>-<target-triple>[.exe]`"* and *"Install layout on Windows:
+`%LOCALAPPDATA%\dx\bin`, one `dx-<tool>` file per tool"*.
+
+**So this was never an open question.** The earlier reasoning - that "the
+organisation is already `essence-dx`, so a second `dx` prefix in the slug is
+redundant" - is about the **repository slug**, and the slug is
+`essence-dx/codebase`; the **binary** is `dx-codebase`, and that is what the
+registry and the installer use. A `codebase` binary would have been a product
+the hub could not install. `CB-01` and `CB-15` are corrected.
+
+**`CB-23` maps the rename that follows.** The name is not one string in one
+file: it is **200+ occurrences across about twenty files**, in five roles -
+the binary inside the archive, the archive name, the release selection, the
+MCP client config key, and the package registries - and each role needs a
+different answer. The registries are the sharp one: `codebase-memory-mcp` on
+npm and the `deusdata/codebase-memory-mcp` brew tap **belong to upstream**,
+and a fork must not publish under those names.
+
+**A mechanical rename was tried and reverted**, and the reason is the point:
+it reached the *packaging* side of each pair and not the *extraction* side,
+because the two live in different files, and **a pipeline whose halves disagree
+is worse than an untouched one** - it fails at the step with no obvious cause.
+The mapping is in `CB-23` so the rename can be made deliberately, role by
+role.
+
 ### 2026-10-21 - `fix:` the governance verdict could never be anything but "unverifiable"
 
 **Two more flaws, and the first of them made the fork's headline feature
