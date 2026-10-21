@@ -14,7 +14,10 @@
 #include <stddef.h>
 #include <stdarg.h>
 
-#include "foundation/printf_attr.h"
+/* Same directory: units without -Isrc include this header relatively. The
+ * lsp_all unity build compiles with GRAMMAR_CFLAGS_TEST, which has no -Isrc,
+ * so an "foundation/..." include would not resolve there. */
+#include "printf_attr.h"
 
 #define CBM_ARENA_MAX_BLOCKS 256
 #define CBM_ARENA_DEFAULT_BLOCK_SIZE ((size_t)64 * 1024) /* 64KB */
