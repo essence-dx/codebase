@@ -1736,6 +1736,7 @@ extern void suite_graph_mem(void);
 extern void suite_test_impact(void);
 extern void suite_dx_surface(void);
 extern void suite_dx_governance(void);
+extern void suite_dx_memory(void);
 extern void suite_test_impact_profiles(void);
 extern void suite_test_impact_changes(void);
 extern void suite_test_impact_origins(void);
@@ -2321,6 +2322,9 @@ int main(int argc, char **argv) {
 
     /* The DX governance verdicts (DX) */
     RUN_SELECTED_SUITE(dx_governance);
+
+    /* The DX anchored memory (DX) */
+    RUN_SELECTED_SUITE(dx_memory);
 
     /* Shared MCP daemon coordination + private framing */
     RUN_SELECTED_SUITE(daemon);

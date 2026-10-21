@@ -19,6 +19,58 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `feat:` anchored memory - a memory that says when it went stale
+
+**Milestone M5, policy half.** The base stores decisions, but nothing it stores
+can be checked against the code it describes. A decision written three weeks ago
+about a function that was rewritten yesterday reads exactly the same as one that
+is still true.
+
+**What was built (DX).**
+
+| File | What it is |
+| --- | --- |
+| `src/mcp/dx_memory.h` | The four anchor states and the contract. |
+| `src/mcp/dx_memory.c` | The policy. **Pure**: it reads no files and calls no graph. |
+| `tests/test_dx_memory.c` | 12 contract tests. |
+
+**The four states.**
+
+| State | Means |
+| --- | --- |
+| `valid` | the anchored span is byte-for-byte what it was |
+| `changed` | the span moved or its content differs |
+| `gone` | the file or the symbol no longer exists |
+| `unanchored` | the span could not be located, so nothing can be claimed |
+
+**"gone" and "unanchored" are different answers and are never merged.** A memory
+that was never anchored to a span recalls as `unanchored`, never as `valid`: a
+memory nobody can check is not a memory anybody can trust. And every memory comes
+back with a **reason** - a verdict without a reason is a claim, and this module
+makes claims only about things it checked.
+
+**The module is pure on purpose.** It does not read the file; the caller
+supplies the current content of the anchored span and the module decides what
+that means. That is what makes every state verifiable without a store, a graph
+or a build - and it is why the store side can be written later without touching
+the policy.
+
+**No new dependency.** The hash is the vendored `xxhash` (XXH64, lowercase
+hex), so the same text always hashes the same and nothing is fetched at
+runtime.
+
+**Executed.**
+
+| Check | Result |
+| --- | --- |
+| `dx_memory.c` compiles clean under the project flags | exit 0 |
+| The memory contract tests pass | **12 passed, exit 0** |
+| `dx_memory.c` and `test_dx_memory.c` pass `-fsyntax-only` with the project include set | exit 0 |
+
+**Not yet done.** The store side - writing a memory with its anchor hash, and
+resolving an anchor to the current span at recall time - needs the base's store
+and its Windows-safe file access. `CB-11` records it.
+
 ### 2026-10-21 - `feat:` the governance verdicts - the tool can refute, not just answer
 
 **Milestone M3.** A retrieval tool informs. This one **refutes**. Three of the

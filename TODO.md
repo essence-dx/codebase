@@ -290,11 +290,25 @@ note on every response - *"facts, never commands"*. The base's own `docs/`
 records the same idea from the other side: `agent-memory-hub` tracks "codebase
 conclusions that go stale when their files change".
 
-**What to build.** Every memory the fork records carries the hash of what it
-claims, and a recall reports the state rather than the claim.
+**What to build.** Every memory the fork records carries the hash of the exact
+span of code the memory is about. A recall re-checks the anchor and reports the
+state, so an agent is *told* when its memory is out of date instead of serving
+a confident stale fact.
+
+**Status 2026-10-21.** The **policy** is done and tested:
+`src/mcp/dx_memory.c` implements the four states with 12 contract tests, and the
+module is **pure** - it reads no files and calls no graph, so the caller
+supplies the current content of the anchored span and the module decides what
+that means. The hash is the vendored `xxhash` (XXH64, hex), so it is stable
+and needs no new dependency.
+
+**Not yet done.** The store side: writing a memory with its anchor hash, and
+resolving an anchor to the current span at recall time, both need the base's
+store and its Windows-safe file access. That is the next slice.
 
 **Done when.** A memory whose symbol was edited recalls as `changed`, and one
-whose symbol was deleted recalls as `gone`, with no false certainty.
+whose symbol was deleted recalls as `gone`, with no false certainty - and a
+memory that was never anchored recalls as `unanchored`, never as `valid`.
 
 ### CB-12 - `dx-codebase prove`: measure it before you trust it
 
