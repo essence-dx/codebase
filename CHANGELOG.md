@@ -19,6 +19,41 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `docs:` the audit sentence was left lower-case mid-sentence
+
+The audit line is built from a "consulted" clause, and when the clause was
+folded into the sentence it read:
+
+```
+Answered from the indexed graph. The committed request type was 'details',
+which the draft also proposed. the graph is the only source consulted;
+where it does not know, the answer says so.
+```
+
+A full stop followed by a lower-case "the". Small, and it is the agent-facing
+text, which is the one piece of this surface a reader actually sees.
+
+The three clauses are now capitalised, because they start a sentence:
+
+| Type | The audit says |
+| --- | --- |
+| `escape` | *No graph query was needed...* |
+| `certificate` | *The caller's paths and boundaries are the only source consulted* |
+| `enforce` | *The caller's findings and baseline are the only source consulted* |
+| everything else, and `verify` | *The graph is the only source consulted* |
+
+**Executed, on the rebuilt binary, over real stdio:**
+
+```
+exit code: 0
+responses: 4
+tool count: 1
+  dx_codebase  alwaysLoad=True
+audit: Answered from the indexed graph. The committed request type was
+  'details', which the draft also proposed. The graph is the only source
+  consulted; where it does not know, the answer says so.
+```
+
 ### 2026-10-21 - `feat:` the fork's release assets are `dx-codebase`
 
 The hub's contract (`G:\Dx\AGENTS.md`) is `dx-<tool>-<target-triple>`, and
