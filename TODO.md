@@ -375,6 +375,37 @@ side by side.
 measurement run, this tool appears in the Agent Retrieval Bench results, and the
 published table shows a case where it loses.
 
+**Partial measurement, 2026-10-21 - the surface size, on the built binary.**
+The `tools/list` payload the agent receives, under each profile, at the base's
+own four-bytes-per-token rate:
+
+| Profile | Tools | Schema bytes | Tokens |
+| --- | --- | --- | --- |
+| ALL (upstream's surface) | 18 | 24111 | 6028 |
+| DX (this fork's surface) | 1 | 3182 | 796 |
+
+**An 86.8% reduction in the schema the agent receives**, measured on
+`build/c/codebase-memory-mcp.exe`. What this does **not** measure, and what
+this item is actually for: the whole-session token cost, with a real agent, on
+a real repository, against a real baseline. The schema is what the agent
+receives once; a session receives it once and then spends its tokens on
+answers, so the session number could be smaller, larger, or the same. It is
+not measured, and until the pre-registration exists it should not be quoted
+as if it were.
+
+This is also not the base's +66% figure, which is a whole-session measurement
+on the `zod` repository with the GPT-5.6 grid. Two different measurements, two
+different claims.
+
+**What to build next, in order.**
+
+1. A **pre-registration**: the hypothesis (the DX surface costs fewer tokens
+   per answered question than the full menu, for the same answer quality),
+   the repositories, the agent, the budget, the analysis, and the failure
+   conditions - all fixed and committed **before** the first run.
+2. The run, on a repository that is indexed on this machine.
+3. The published table, with the losses beside the wins.
+
 ### CB-14 - Fix the upstream sync cadence
 
 **Evidence.** Upstream landed 74 commits on this repository's `main` in one
