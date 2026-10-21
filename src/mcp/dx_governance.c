@@ -242,7 +242,37 @@ char *dx_governance_certificate(const char *before_json, const char *after_json,
     yyjson_val *after = after_doc ? yyjson_doc_get_root(after_doc) : NULL;
     yyjson_val *bounds = bounds_doc ? yyjson_doc_get_root(bounds_doc) : NULL;
 
-    if (!yyjson_is_arr(after)) {
+    /* Every input is type-checked, and each one has to be.
+     *
+     * "after" that is not an array is obviously wrong. "before" that is not
+     * an array is worse, because it fails QUIETLY: dx_path_in_list answers
+     * "not in before" for a list it cannot read, so every path reachable
+     * after and inside a boundary would be reported as NEWLY OPENED. A
+     * malformed input must not produce the maximal verdict.
+     *
+     * And the boundaries are worse still, in the other direction. Boundaries
+     * that cannot be read mean NO boundaries, and no boundaries mean nothing
+     * is opened, and nothing opened means the certificate says CLEAN. A
+     * malformed boundary list would silently switch off the very check it
+     * exists to perform, and hand out a clean certificate for a change that
+     * opened one. That is the dangerous direction, so it is refused.
+     *
+     * An ABSENT boundary list is not malformed: the caller may simply have
+     * none, and "no boundaries" is the honest answer for that. The empty
+     * array is the absent case, and it is accepted. */
+    if (!yyjson_is_arr(before) || !yyjson_is_arr(after)) {
+        if (before_doc) {
+            yyjson_doc_free(before_doc);
+        }
+        if (after_doc) {
+            yyjson_doc_free(after_doc);
+        }
+        if (bounds_doc) {
+            yyjson_doc_free(bounds_doc);
+        }
+        return NULL;
+    }
+    if (bounds && !yyjson_is_arr(bounds)) {
         if (before_doc) {
             yyjson_doc_free(before_doc);
         }
@@ -375,6 +405,31 @@ char *dx_governance_enforce(const char *findings_json, const char *baseline_json
         return NULL;
     }
 
+    /* The baseline is type-checked too, and for the same reason the boundary
+     * list is. A baseline the code cannot read freezes NOTHING, so every
+     * frozen finding counts as newly frozen, the gate holds, and a build
+     * fails for a reason its author cannot see. The failure is in the safe
+     * direction, but it is still a silent one: the caller sent a shape and
+     * got a verdict that says nothing about the shape. A malformed baseline
+     * is an error, and an error should say so. */
+    yyjson_doc *base_doc = baseline_json ? yyjson_read(baseline_json, strlen(baseline_json), 0) : NULL;
+    if (baseline_json && !base_doc) {
+        if (doc) {
+            yyjson_doc_free(doc);
+        }
+        return NULL;
+    }
+    yyjson_val *base_root = base_doc ? yyjson_doc_get_root(base_doc) : NULL;
+    if (base_root && !yyjson_is_arr(base_root)) {
+        if (doc) {
+            yyjson_doc_free(doc);
+        }
+        if (base_doc) {
+            yyjson_doc_free(base_doc);
+        }
+        return NULL;
+    }
+
     yyjson_mut_doc *mdoc = yyjson_mut_doc_new(NULL);
     if (!mdoc) {
         yyjson_doc_free(doc);
@@ -443,5 +498,8 @@ char *dx_governance_enforce(const char *findings_json, const char *baseline_json
     char *out = yyjson_mut_write(mdoc, 0, NULL);
     yyjson_mut_doc_free(mdoc);
     yyjson_doc_free(doc);
+    if (base_doc) {
+        yyjson_doc_free(base_doc);
+    }
     return out;
 }

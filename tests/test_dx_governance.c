@@ -150,6 +150,86 @@ TEST(dx_certify_rejects_a_non_array) {
 
 /* ----------------------------------------------- change_impact_certificate */
 
+TEST(dx_a_before_that_is_not_an_array_is_refused_not_read_as_empty) {
+    /* "before" that is not an array of paths must not be read as "nothing was
+     * reachable before". That reading would make every path reachable after
+     * and inside a boundary look NEWLY OPENED - the maximal verdict, produced
+     * by a malformed input. "after" was already type-checked; "before" was
+     * not, and the failure was silent. */
+    const char *bounds = "[{\"name\":\"auth\",\"path_prefix\":\"src/auth\"}]";
+    ASSERT_NULL(dx_governance_certificate("\"garbage\"", "[\"src/auth/token.c\"]", bounds));
+    ASSERT_NULL(dx_governance_certificate("{\"not\":\"an array\"}", "[\"src/auth/token.c\"]", bounds));
+    ASSERT_NULL(dx_governance_certificate("42", "[\"src/auth/token.c\"]", bounds));
+    PASS();
+}
+
+TEST(dx_a_malformed_boundary_list_is_refused_not_read_as_no_boundaries) {
+    /* A boundary list the code cannot read means NO boundaries, and no
+     * boundaries mean nothing is opened, and nothing opened means the
+     * certificate says CLEAN. A malformed boundary list would silently
+     * switch off the very check it exists to perform. */
+    const char *before = "[\"src/other.c\"]";
+    const char *after = "[\"src/auth/token.c\"]";
+    ASSERT_NULL(dx_governance_certificate(before, after, "\"garbage\""));
+    ASSERT_NULL(dx_governance_certificate(before, after, "{\"not\":\"an array\"}"));
+    ASSERT_NULL(dx_governance_certificate(before, after, "42"));
+    /* An ABSENT boundary list is not malformed: the empty array is the
+     * absent case, and it is accepted. */
+    char *clean = dx_governance_certificate(before, after, "[]");
+    ASSERT_NOT_NULL(clean);
+    free(clean);
+    PASS();
+}
+
+TEST(dx_a_malformed_baseline_is_refused_not_read_as_an_empty_baseline) {
+    /* A baseline the code cannot read freezes NOTHING, so every frozen
+     * finding counts as newly frozen and the gate holds - a build fails for
+     * a reason its author cannot see. */
+    const char *findings =
+        "[{\"action\":\"frozen\",\"kind\":\"api_surface\",\"file\":\"src/a.c\"}]";
+    ASSERT_NULL(dx_governance_enforce(findings, "\"garbage\""));
+    ASSERT_NULL(dx_governance_enforce(findings, "{\"not\":\"an array\"}"));
+    ASSERT_NULL(dx_governance_enforce(findings, "42"));
+    /* An absent baseline is not malformed. */
+    char *gate = dx_governance_enforce(findings, NULL);
+    ASSERT_NOT_NULL(gate);
+    free(gate);
+    PASS();
+}
+
+TEST(dx_a_well_formed_baseline_still_adopts_the_debt) {
+    /* The established contract: "held" is true when NOTHING blocks - a
+     * blocking finding or a newly frozen one holds the gate, and adopted
+     * debt does not. */
+    const char *findings =
+        "[{\"id\":\"f1\",\"message\":\"old debt\",\"action\":\"frozen\",\"kind\":\"api_surface\"}]";
+    const char *baseline =
+        "[{\"id\":\"b1\",\"message\":\"accepted\",\"action\":\"frozen\",\"kind\":\"api_surface\"}]";
+    char *gate = dx_governance_enforce(findings, baseline);
+    ASSERT_NOT_NULL(gate);
+    yyjson_doc *doc = yyjson_read(gate, strlen(gate), 0);
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    ASSERT_TRUE(yyjson_get_bool(yyjson_obj_get(root, "held")));
+    ASSERT_EQ((long long)yyjson_arr_size(yyjson_obj_get(root, "frozen_accepted")), 1);
+    ASSERT_EQ((long long)yyjson_arr_size(yyjson_obj_get(root, "frozen_new")), 0);
+    yyjson_doc_free(doc);
+    free(gate);
+    PASS();
+}
+
+TEST(dx_a_well_formed_certificate_still_works) {
+    /* The guard must not break the ordinary case. */
+    const char *bounds = "[{\"name\":\"auth\",\"path_prefix\":\"src/auth\"}]";
+    char *out = dx_governance_certificate("[\"src/other.c\"]", "[\"src/auth/token.c\"]", bounds);
+    ASSERT_NOT_NULL(out);
+    yyjson_doc *doc = yyjson_read(out, strlen(out), 0);
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    ASSERT_STR_EQ(yyjson_get_str(yyjson_obj_get(root, "verdict")), "opened");
+    yyjson_doc_free(doc);
+    free(out);
+    PASS();
+}
+
 TEST(dx_a_newly_reachable_path_inside_a_boundary_is_an_opening) {
     const char *before = "[\"src/other.c\"]";
     const char *after = "[\"src/other.c\",\"src/auth/token.c\"]";
@@ -357,6 +437,11 @@ SUITE(dx_governance) {
     RUN_TEST(dx_a_missing_compat_is_potentially_breaking);
     RUN_TEST(dx_a_breaking_export_with_no_known_consumer_is_still_breaking);
     RUN_TEST(dx_certify_rejects_a_non_array);
+    RUN_TEST(dx_a_before_that_is_not_an_array_is_refused_not_read_as_empty);
+    RUN_TEST(dx_a_malformed_boundary_list_is_refused_not_read_as_no_boundaries);
+    RUN_TEST(dx_a_malformed_baseline_is_refused_not_read_as_an_empty_baseline);
+    RUN_TEST(dx_a_well_formed_baseline_still_adopts_the_debt);
+    RUN_TEST(dx_a_well_formed_certificate_still_works);
     RUN_TEST(dx_a_newly_reachable_path_inside_a_boundary_is_an_opening);
     RUN_TEST(dx_a_path_that_was_already_reachable_is_not_an_opening);
     RUN_TEST(dx_only_the_new_path_counts_when_a_boundary_gains_one);

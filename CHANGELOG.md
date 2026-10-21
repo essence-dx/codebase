@@ -19,6 +19,105 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `fix:` the governance verdict could never be anything but "unverifiable"
+
+**Two more flaws, and the first of them made the fork's headline feature
+useless.**
+
+**Flaw 1 - `verify` could never verify anything.** The DX layer's governance
+verdict - the feature that most distinguishes this fork - was structurally
+broken. `verify` resolves its subject through the base's own snippet lookup,
+so it needs a project exactly as much as a base tool does, and the base has
+no implicit fallback:
+
+```c
+if (!project) {
+    return NULL; /* project is required - no implicit fallback */
+}
+```
+
+But the session-project defaulting was applied only to requests that dispatch
+to a base tool:
+
+```c
+if (base_tool) {
+    (void)dx_surface_apply_session_project(&req, cbm_mcp_server_session_project(srv));
+}
+```
+
+`verify` has **no base tool** - the DX layer answers it - so the project was
+never supplied, the subject was looked up in *no project*, the lookup failed,
+and the verdict came back **`unverifiable`** for a subject the graph knew
+perfectly well.
+
+That is the wrong kind of wrong. The contract says *"a subject the graph does
+not have is unverifiable, never refuted: the graph not knowing is not evidence
+that the claim is false."* But **the DX layer failing to ask the graph the
+right question is not the graph not knowing**, and to a reader the two
+answers are indistinguishable. A `verify` request was guaranteed to be
+unverifiable, so the verdict carried no information at all.
+
+**The fix** is one line - the session project now applies to every request
+type:
+
+```c
+(void)dx_surface_apply_session_project(&req, cbm_mcp_server_session_project(srv));
+```
+
+`certificate` and `enforce` turned out not to need a project (they work on
+path arrays and on findings), so `verify` was the only broken one - but the
+defaulting is now correct by construction rather than by accident.
+
+**Flaw 2 - a malformed input produced the strongest possible verdict.** The
+certificate's differential is *"reachable after, not before, and inside a
+declared boundary"*. `after` was type-checked; **`before` was not**, and
+`dx_path_in_list` answers *"not in before"* for a list it cannot read. So a
+`before` that was not an array of paths - a string, a number, an object - made
+**every** path reachable after and inside a boundary look **newly opened**.
+
+And the **boundary list** was worse, in the other direction. Boundaries that
+cannot be read mean NO boundaries, and no boundaries mean nothing is opened,
+and nothing opened means the certificate says **clean**. A malformed boundary
+list silently switched off the very check it exists to perform, and handed out
+a clean certificate for a change that had opened one.
+
+The same trap sat in `enforce`: a baseline the code cannot read freezes
+**nothing**, so every frozen finding counts as newly frozen and the gate
+holds - a build fails for a reason its author cannot see.
+
+**All three are now type-checked**, and a malformed input is refused rather
+than read as empty. An *absent* input is not malformed: the empty array is
+the absent case, and it is still accepted.
+
+**Executed.**
+
+| Check | Result |
+| --- | --- |
+| The governance contract tests | **28 passed**, exit 0 (was 23) |
+| `dx_a_before_that_is_not_an_array_is_refused_not_read_as_empty` | the malformed input is refused, not read as empty |
+| `dx_a_malformed_boundary_list_is_refused_not_read_as_no_boundaries` | a malformed boundary list cannot hand out a clean certificate |
+| `dx_a_malformed_baseline_is_refused_not_read_as_an_empty_baseline` | a malformed baseline is an error, not a silent build failure |
+| `dx_a_well_formed_certificate_still_works`, `dx_a_well_formed_baseline_still_adopts_the_debt` | the ordinary cases are unaffected |
+
+**A note on the shape of the fix.** The first version of this fix left the
+boundaries alone, with a comment saying that "no boundaries" is the safe
+direction. **That was wrong**, and the test caught it: no boundaries means
+nothing is opened, which means the certificate says clean - the dangerous
+direction, not the safe one. A comment that asserts a direction is safe is
+worth nothing without a test that checks the direction.
+
+**The house test for the first flaw** is the one that matters, and it is
+written from the contract rather than from the implementation:
+
+- `dx_verify_resolves_its_subject_in_the_session_project` - a subject that
+  **is** in the session's project verifies as **confirmed**, and the request
+  names no project at all.
+- `dx_verify_reports_unverifiable_for_a_subject_the_graph_does_not_have` - a
+  subject that **is not** in the graph is **unverifiable**, and never
+  **refuted**. That second test is the guard against fixing the first the
+  wrong way: making the layer claim "confirmed" whenever it cannot find the
+  subject would satisfy the first test and break the contract.
+
 ### 2026-10-21 - `fix:` the DX tool broke three of upstream's own contracts
 
 **Found by running the whole house suite** - the first complete run of it on
