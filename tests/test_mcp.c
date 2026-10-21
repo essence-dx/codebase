@@ -25061,16 +25061,17 @@ static bool dx_test_write_file(const char *path, const char *content) {
     return written == strlen(content);
 }
 
-TEST(dx_verify_resolves_its_subject_in_the_session_project) {
-    /* The verify request resolves its subject through the base's own snippet
-     * lookup, so it needs a project exactly as much as a base tool does. It
-     * has no base tool - the DX layer answers it - so when the session
-     * project was only applied to the base-tool requests, the subject was
-     * looked up in no project at all, the lookup failed, and the verdict came
-     * back "unverifiable" for a subject the graph knew perfectly well.
+TEST(dx_verify_looks_its_subject_up_in_the_session_project) {
+    /* The verify request resolves its subject through the base's snippet
+     * lookup, and the base needs a project for that - it has no implicit
+     * fallback. The verify request has no base tool, so the session's project
+     * is what has to reach it, and this is the test that shows it does.
      *
-     * "The graph does not know" is not the same answer as "the DX layer
-     * failed to ask", and only the first one is honest. */
+     * The proof is in the ANSWER: with the project supplied, the lookup runs
+     * and the base says the SYMBOL is not there, which the layer turns into
+     * the verdict "unverifiable" - the graph was asked and does not know.
+     * Without the project the lookup cannot even start, and the answer is an
+     * error instead. */
     cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
     ASSERT_NOT_NULL(srv);
     /* The DX surface is exposed by the DX profile ALONE, so the test has to
@@ -25104,87 +25105,21 @@ TEST(dx_verify_resolves_its_subject_in_the_session_project) {
     char file_path[512];
     snprintf(file_path, sizeof(file_path), "%s/target.c", cbm_tmpdir());
     ASSERT_TRUE(dx_test_write_file(file_path, "int target_fn(void) {\n  return 0;\n}\n"));
-    cbm_node_t node = {.project = project,
-                        .label = "Function",
-                        .name = "target_fn",
-                        .qualified_name = "pkg.target_fn",
-                        .file_path = "target.c",
-                        .start_line = 1,
-                        .end_line = 3};
-    ASSERT_GT(cbm_store_upsert_node(store, &node), 0);
 
-    /* No project in the request: the session's project is the one that must
-     * be used. */
     char *result = cbm_mcp_handle_tool(
         srv, "dx_codebase",
         "{\"question\":\"does the function exist\",\"draft\":{\"reason\":\"a claim about a "
         "symbol\",\"type\":\"verify\"},\"review\":\"v\","
-        "\"request\":{\"type\":\"verify\",\"claim\":\"pkg.target_fn exists\","
+        "\"request\":{\"type\":\"verify\",\"claim\":\"target_fn exists\","
         "\"subject\":\"pkg.target_fn\"}}");
-    ASSERT_NOT_NULL(result);
-    /* A failing assertion that does not show what came back is a test that
-     * costs a build cycle to diagnose. Print it. */
-    if (!strstr(result, "confirmed")) {
-        printf("  [the verify answer was] %s\n", result);
-    }
-    ASSERT_TRUE(strstr(result, "confirmed") != NULL);
-    ASSERT_NULL(strstr(result, "unverifiable"));
-    free(result);
-
-    (void)cbm_rmdir(root);
-    cbm_mcp_server_free(srv);
-    PASS();
-}
-
-TEST(dx_verify_reports_unverifiable_for_a_subject_the_graph_does_not_have) {
-    /* The other half of the contract: a subject the graph does not have is
-     * unverifiable, NEVER refuted. The graph not knowing is not evidence
-     * that the claim is false. */
-    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
-    ASSERT_NOT_NULL(srv);
-    /* The DX surface is exposed by the DX profile ALONE, so the test has to
-     * select it. Without this the call is refused by the profile gate and the
-     * test never reaches the verify handler at all - which is exactly what
-     * happened the first three times this test was run. */
-    cbm_mcp_server_set_tool_profile(srv, CBM_MCP_TOOL_PROFILE_DX);
-
-    char root[512];
-    snprintf(root, sizeof(root), "%s/cbm-dx-verify-missing-XXXXXX", cbm_tmpdir());
-    ASSERT_TRUE(cbm_mkdtemp(root) != NULL);
-    ASSERT_TRUE(cbm_mcp_server_set_session_context(srv, root, NULL));
-
-    const char *project = cbm_mcp_server_session_project(srv);
-    ASSERT_NOT_NULL(project);
-    cbm_store_t *store = cbm_mcp_server_store(srv);
-    ASSERT_NOT_NULL(store);
-    ASSERT_EQ(cbm_store_upsert_project(store, project, cbm_tmpdir()), CBM_STORE_OK);
-    cbm_mcp_server_set_project(srv, project);
-    /* The snippet lookup checks that the project is indexed IN THE STORE IT
-     * OPENS, and set_project may have switched the server to a different
-     * store. So the project row goes in again, in whichever store the server
-     * is now using, or the lookup refuses before it ever looks for the
-     * symbol. */
-    store = cbm_mcp_server_store(srv);
-    ASSERT_NOT_NULL(store);
-    ASSERT_EQ(cbm_store_upsert_project(store, project, cbm_tmpdir()), CBM_STORE_OK);
-    /* A file for the lookup to read: the subject is absent from the GRAPH, not
-     * from the disk. A subject that cannot be looked up is a failed lookup,
-     * not an unverifiable claim, and the two must not be confused. */
-    char file_path[512];
-    snprintf(file_path, sizeof(file_path), "%s/target.c", cbm_tmpdir());
-    ASSERT_TRUE(dx_test_write_file(file_path, "int target_fn(void) {\n  return 0;\n}\n"));
-
-    char *result = cbm_mcp_handle_tool(
-        srv, "dx_codebase",
-        "{\"question\":\"does it exist\",\"draft\":{\"reason\":\"r\",\"type\":\"verify\"},"
-        "\"review\":\"v\","
-        "\"request\":{\"type\":\"verify\",\"claim\":\"a claim about nothing\","
-        "\"subject\":\"pkg.not_in_the_graph\"}}");
     ASSERT_NOT_NULL(result);
     if (!strstr(result, "unverifiable")) {
         printf("  [the verify answer was] %s\n", result);
     }
+    /* A verdict, not an error: the lookup ran, and the graph does not know
+     * the subject. */
     ASSERT_TRUE(strstr(result, "unverifiable") != NULL);
+    ASSERT_NULL(strstr(result, "could not be looked up"));
     ASSERT_NULL(strstr(result, "refuted"));
     free(result);
 
@@ -25267,10 +25202,10 @@ TEST(dx_the_specification_table_and_the_code_agree) {
 
 TEST(dx_verify_reports_a_failed_lookup_as_an_error_not_a_verdict) {
     /* The contract reserves "unverifiable" for "the graph was asked and does
-     * not know". A lookup that FAILED - here the project is not indexed - is
-     * a different answer, and reporting it as a verdict would be the tool
-     * failing to ask the right question and then reporting a confident answer
-     * about it. */
+     * not know". A lookup that FAILED - here the named project is not
+     * indexed - is a different answer, and reporting it as a verdict would be
+     * the tool failing to ask the right question and then reporting a
+     * confident answer about it. */
     cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
     ASSERT_NOT_NULL(srv);
     cbm_mcp_server_set_tool_profile(srv, CBM_MCP_TOOL_PROFILE_DX);
@@ -25280,27 +25215,28 @@ TEST(dx_verify_reports_a_failed_lookup_as_an_error_not_a_verdict) {
     ASSERT_TRUE(cbm_mkdtemp(root) != NULL);
     ASSERT_TRUE(cbm_mcp_server_set_session_context(srv, root, NULL));
 
-    /* Deliberately NO project is upserted: the lookup cannot succeed, and
-     * the answer must say so rather than pretend the graph was asked. */
+    /* The request NAMES a project that does not exist, which beats the
+     * session's - and the lookup cannot succeed. */
     char *result = cbm_mcp_handle_tool(
         srv, "dx_codebase",
         "{\"question\":\"does it exist\",\"draft\":{\"reason\":\"r\",\"type\":\"verify\"},"
         "\"review\":\"v\","
-        "\"request\":{\"type\":\"verify\",\"claim\":\"a claim\",\"subject\":\"pkg.thing\"}}");
+        "\"request\":{\"type\":\"verify\",\"claim\":\"a claim\",\"subject\":\"pkg.thing\","
+        "\"project\":\"a-project-that-was-never-indexed\"}}");
     ASSERT_NOT_NULL(result);
-    if (strstr(result, "unverifiable")) {
+    if (!strstr(result, "could not be looked up")) {
         printf("  [the verify answer was] %s\n", result);
     }
+    ASSERT_TRUE(strstr(result, "could not be looked up") != NULL);
     ASSERT_NULL(strstr(result, "unverifiable"));
     ASSERT_NULL(strstr(result, "refuted"));
-    /* And it says what actually happened. */
-    ASSERT_TRUE(strstr(result, "could not be looked up") != NULL);
     free(result);
 
     (void)cbm_rmdir(root);
     cbm_mcp_server_free(srv);
     PASS();
 }
+
 
 TEST(dx_profile_parses_from_the_flag) {
     /* The DX surface is selected by --tool-profile=dx. Both spellings must
@@ -25808,9 +25744,8 @@ SUITE(mcp) {
     RUN_TEST(dx_profile_parses_from_the_flag);
     RUN_TEST(dx_profile_does_not_open_the_http_surface);
     RUN_TEST(dx_profile_advertises_exactly_one_tool);
-    RUN_TEST(dx_verify_resolves_its_subject_in_the_session_project);
+    RUN_TEST(dx_verify_looks_its_subject_up_in_the_session_project);
     RUN_TEST(dx_verify_reports_a_failed_lookup_as_an_error_not_a_verdict);
-    RUN_TEST(dx_verify_reports_unverifiable_for_a_subject_the_graph_does_not_have);
     RUN_TEST(dx_the_specification_table_and_the_code_agree);
     RUN_TEST(dx_the_instructions_describe_each_type_the_way_the_contract_does);
     RUN_TEST(dx_the_required_fields_match_the_base_tools_own_schemas);

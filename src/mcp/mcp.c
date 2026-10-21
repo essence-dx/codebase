@@ -21064,8 +21064,16 @@ static bool dx_gov_snippet_lookup_failed(const char *json) {
     }
     /* "symbol not found" is the base's way of saying the graph was asked and
      * does not have it. Everything else - "project not found", "project not
-     * indexed", a file that cannot be read - is a failed lookup. */
-    bool failed = strncmp(err, "symbol not found", 17) != 0;
+     * indexed", a file that cannot be read - is a failed lookup.
+     *
+     * The length comes from sizeof rather than from a literal, because
+     * "symbol not found" is SIXTEEN characters: comparing seventeen of them
+     * matches the base's trailing full stop instead of the end of the
+     * phrase, so the not-found case was classified as a failed lookup, and a
+     * subject the graph does not have came back as an ERROR rather than as
+     * the verdict it is. */
+    static const char NOT_FOUND[] = "symbol not found";
+    bool failed = strncmp(err, NOT_FOUND, sizeof(NOT_FOUND) - 1) != 0;
     free(err);
     return failed;
 }
