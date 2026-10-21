@@ -380,8 +380,17 @@ TEST(dx_wrapped_result_carries_audit_and_next) {
     char *audit = dx_surface_audit_text(&req, "the indexed graph");
     ASSERT_NOT_NULL(audit);
 
+    dx_answer_shape_t shape;
+    memset(&shape, 0, sizeof(shape));
+    shape.source_policy = DX_SOURCE_OUTLINE;
+    shape.tokens = 17;
+    shape.budget = 3200;
+    char *shape_json = dx_surface_shape_json(&shape);
+    ASSERT_NOT_NULL(shape_json);
+
     const char *inner = "{\"content\":[{\"type\":\"text\",\"text\":\"three results\"}]}";
-    char *wrapped = dx_surface_wrap_result(inner, audit, DX_NEXT_ANSWER, "you have enough");
+    char *wrapped =
+        dx_surface_wrap_result(inner, audit, shape_json, DX_NEXT_ANSWER, "you have enough");
     ASSERT_NOT_NULL(wrapped);
 
     yyjson_doc *doc = yyjson_read(wrapped, strlen(wrapped), 0);
@@ -395,6 +404,10 @@ TEST(dx_wrapped_result_carries_audit_and_next) {
     yyjson_val *audit_val = yyjson_obj_get(root, "audit");
     ASSERT_TRUE(yyjson_is_str(audit_val));
 
+    yyjson_val *shape_val = yyjson_obj_get(root, "shape");
+    ASSERT_TRUE(yyjson_is_obj(shape_val));
+    ASSERT_EQ(yyjson_get_int(yyjson_obj_get(shape_val, "tokens")), 17);
+
     yyjson_val *next = yyjson_obj_get(root, "next");
     ASSERT_TRUE(yyjson_is_obj(next));
     yyjson_val *kind = yyjson_obj_get(next, "kind");
@@ -405,15 +418,16 @@ TEST(dx_wrapped_result_carries_audit_and_next) {
 
     yyjson_doc_free(doc);
     free(wrapped);
+    free(shape_json);
     free(audit);
     dx_surface_request_free(&req);
     PASS();
 }
 
 TEST(dx_wrapped_result_rejects_a_non_object) {
-    ASSERT_NULL(dx_surface_wrap_result("not json", "audit", DX_NEXT_ANSWER, "d"));
-    ASSERT_NULL(dx_surface_wrap_result("[1,2,3]", "audit", DX_NEXT_ANSWER, "d"));
-    ASSERT_NULL(dx_surface_wrap_result(NULL, "audit", DX_NEXT_ANSWER, "d"));
+    ASSERT_NULL(dx_surface_wrap_result("not json", "audit", NULL, DX_NEXT_ANSWER, "d"));
+    ASSERT_NULL(dx_surface_wrap_result("[1,2,3]", "audit", NULL, DX_NEXT_ANSWER, "d"));
+    ASSERT_NULL(dx_surface_wrap_result(NULL, "audit", NULL, DX_NEXT_ANSWER, "d"));
     PASS();
 }
 
@@ -421,6 +435,264 @@ TEST(dx_next_kinds_are_the_three_agreed_values) {
     ASSERT_STR_EQ(DX_NEXT_ANSWER, "answer");
     ASSERT_STR_EQ(DX_NEXT_INSPECT, "inspect");
     ASSERT_STR_EQ(DX_NEXT_ESCAPE, "escape");
+    PASS();
+}
+
+TEST(dx_source_defaults_to_outline) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    int rc = dx_surface_parse(DX_VALID, &req, &err);
+    ASSERT_EQ(rc, 0);
+    ASSERT_EQ(req.source_policy, DX_SOURCE_OUTLINE);
+    ASSERT_FALSE(req.max_tokens_set);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_source_full_is_an_explicit_opt_in) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"details\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"details\",\"qualified_name\":\"a.b.c\",\"source\":\"full\"}}";
+    int rc = dx_surface_parse(args, &req, &err);
+    ASSERT_EQ(rc, 0);
+    ASSERT_EQ(req.source_policy, DX_SOURCE_FULL);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_unknown_source_policy_is_rejected) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"details\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"details\",\"source\":\"whatever\"}}";
+    int rc = dx_surface_parse(args, &req, &err);
+    ASSERT_EQ(rc, -1);
+    ASSERT_NOT_NULL(err);
+    ASSERT_TRUE(strstr(err, "request.source") != NULL);
+    free(err);
+    PASS();
+}
+
+TEST(dx_the_source_policy_reaches_the_base_in_its_own_vocabulary) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"details\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"details\",\"qualified_name\":\"a.b.c\"}}";
+    int rc = dx_surface_parse(args, &req, &err);
+    ASSERT_EQ(rc, 0);
+
+    yyjson_doc *doc = yyjson_read(req.args_json, strlen(req.args_json), 0);
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    yyjson_val *mode = yyjson_obj_get(root, "source_mode");
+    ASSERT_TRUE(yyjson_is_str(mode));
+    ASSERT_STR_EQ(yyjson_get_str(mode), "outline");
+    /* "source" is the DX field, not the base tool's: it must not be forwarded. */
+    ASSERT_NULL(yyjson_obj_get(root, "source"));
+
+    yyjson_doc_free(doc);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_a_full_source_policy_does_not_force_the_base) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"details\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"details\",\"qualified_name\":\"a.b.c\",\"source\":\"full\"}}";
+    int rc = dx_surface_parse(args, &req, &err);
+    ASSERT_EQ(rc, 0);
+
+    yyjson_doc *doc = yyjson_read(req.args_json, strlen(req.args_json), 0);
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    /* The base decides when "full" is asked for; the DX surface only stops
+     * forcing "outline" on top of it. */
+    ASSERT_NULL(yyjson_obj_get(root, "source_mode"));
+    yyjson_doc_free(doc);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_the_budget_reaches_the_base_as_max_output_tokens) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"x\",\"max_tokens\":900}}";
+    int rc = dx_surface_parse(args, &req, &err);
+    ASSERT_EQ(rc, 0);
+    ASSERT_TRUE(req.max_tokens_set);
+    ASSERT_EQ(req.max_tokens, 900);
+
+    yyjson_doc *doc = yyjson_read(req.args_json, strlen(req.args_json), 0);
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    yyjson_val *budget = yyjson_obj_get(root, "max_output_tokens");
+    ASSERT_TRUE(yyjson_is_int(budget));
+    ASSERT_EQ(yyjson_get_int(budget), 900);
+    /* "max_tokens" is the DX field; the base never sees it. */
+    ASSERT_NULL(yyjson_obj_get(root, "max_tokens"));
+    yyjson_doc_free(doc);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_an_explicit_max_output_tokens_wins_over_the_dx_budget) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"x\",\"max_tokens\":900,"
+        "\"max_output_tokens\":200}}";
+    int rc = dx_surface_parse(args, &req, &err);
+    ASSERT_EQ(rc, 0);
+
+    yyjson_doc *doc = yyjson_read(req.args_json, strlen(req.args_json), 0);
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    yyjson_val *budget = yyjson_obj_get(root, "max_output_tokens");
+    ASSERT_EQ(yyjson_get_int(budget), 200);
+    yyjson_doc_free(doc);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_the_token_estimate_is_four_bytes_per_token) {
+    ASSERT_EQ(dx_surface_estimate_tokens(""), 0);
+    ASSERT_EQ(dx_surface_estimate_tokens("abcd"), 1);
+    ASSERT_EQ(dx_surface_estimate_tokens("abcde"), 2);
+    ASSERT_EQ(dx_surface_estimate_tokens("abcdefgh"), 2);
+    ASSERT_EQ(dx_surface_estimate_tokens("abcdefghi"), 3);
+    ASSERT_EQ(dx_surface_estimate_tokens(NULL), 0);
+    PASS();
+}
+
+TEST(dx_an_answer_over_budget_is_refused_not_truncated) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"x\",\"max_tokens\":10}}";
+    int rc = dx_surface_parse(args, &req, &err);
+    ASSERT_EQ(rc, 0);
+
+    const char *big = "{\"content\":[{\"type\":\"text\",\"text\":\"0123456789012345678901234567890\"}]}";
+    dx_answer_shape_t shape;
+    char *out = dx_surface_apply_budget(big, &req, &shape);
+    ASSERT_NOT_NULL(out);
+    ASSERT_TRUE(shape.over_budget);
+    ASSERT_TRUE(shape.excess > 0);
+    ASSERT_TRUE(shape.tokens > shape.budget);
+    /* The refusal says what happened, so the agent can act on it. */
+    ASSERT_TRUE(strstr(out, "refused") != NULL);
+    ASSERT_TRUE(strstr(out, "max_tokens") != NULL);
+    free(out);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_an_answer_inside_the_budget_passes_through) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"x\",\"max_tokens\":10000}}";
+    int rc = dx_surface_parse(args, &req, &err);
+    ASSERT_EQ(rc, 0);
+
+    const char *small = "{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}";
+    dx_answer_shape_t shape;
+    char *out = dx_surface_apply_budget(small, &req, &shape);
+    ASSERT_NOT_NULL(out);
+    ASSERT_FALSE(shape.over_budget);
+    ASSERT_EQ(shape.excess, 0);
+    ASSERT_TRUE(strstr(out, "ok") != NULL);
+    /* The result is a fresh buffer, never the caller's pointer. */
+    ASSERT_TRUE(out != small);
+    free(out);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_no_budget_means_no_gate) {
+    dx_surface_request_t req;
+    char *err = NULL;
+    int rc = dx_surface_parse(DX_VALID, &req, &err);
+    ASSERT_EQ(rc, 0);
+
+    const char *small = "{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}";
+    dx_answer_shape_t shape;
+    char *out = dx_surface_apply_budget(small, &req, &shape);
+    ASSERT_NOT_NULL(out);
+    ASSERT_FALSE(shape.over_budget);
+    ASSERT_EQ(shape.budget, 0);
+    free(out);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
+TEST(dx_the_shape_reports_what_the_answer_carried) {
+    dx_answer_shape_t shape;
+    memset(&shape, 0, sizeof(shape));
+    shape.source_policy = DX_SOURCE_OUTLINE;
+    shape.tokens = 42;
+    shape.budget = 100;
+    shape.bodies_included = 0;
+
+    char *json = dx_surface_shape_json(&shape);
+    ASSERT_NOT_NULL(json);
+    yyjson_doc *doc = yyjson_read(json, strlen(json), 0);
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    yyjson_val *source = yyjson_obj_get(root, "source");
+    ASSERT_STR_EQ(yyjson_get_str(source), "outline");
+    ASSERT_EQ(yyjson_get_int(yyjson_obj_get(root, "tokens")), 42);
+    ASSERT_EQ(yyjson_get_int(yyjson_obj_get(root, "budget")), 100);
+    ASSERT_FALSE(yyjson_get_bool(yyjson_obj_get(root, "over_budget")));
+    ASSERT_EQ(yyjson_get_int(yyjson_obj_get(root, "bodies_included")), 0);
+    yyjson_doc_free(doc);
+    free(json);
+    PASS();
+}
+
+TEST(dx_source_bodies_are_counted) {
+    const char *with_body =
+        "{\"content\":[{\"type\":\"text\",\"text\":\"x\"}],"
+        "\"structuredContent\":{\"qualified_name\":\"a.b\",\"source\":\"int foo(void) {}\","
+        "\"start_line\":10}}";
+    const char *without_body =
+        "{\"content\":[{\"type\":\"text\",\"text\":\"x\"}],"
+        "\"structuredContent\":{\"qualified_name\":\"a.b\",\"start_line\":10}}";
+    ASSERT_EQ(dx_surface_count_bodies(with_body), 1);
+    ASSERT_EQ(dx_surface_count_bodies(without_body), 0);
+    ASSERT_EQ(dx_surface_count_bodies(NULL), 0);
+    ASSERT_EQ(dx_surface_count_bodies("not json"), 0);
+    PASS();
+}
+
+TEST(dx_the_schema_documents_the_answer_policy) {
+    const char *schema = dx_surface_tool_schema();
+    yyjson_doc *doc = yyjson_read(schema, strlen(schema), 0);
+    yyjson_val *root = yyjson_doc_get_root(doc);
+
+    /* The source policy is advertised, with its two values and its default. */
+    yyjson_val *source = dx_path(root, "properties.request.properties.source");
+    ASSERT_TRUE(yyjson_is_obj(source));
+    yyjson_val *source_enum = yyjson_obj_get(source, "enum");
+    ASSERT_TRUE(yyjson_is_arr(source_enum));
+    ASSERT_EQ((long long)yyjson_arr_size(source_enum), 2);
+    ASSERT_STR_EQ(yyjson_get_str(yyjson_arr_get(source_enum, 0)), "outline");
+    ASSERT_STR_EQ(yyjson_get_str(yyjson_arr_get(source_enum, 1)), "full");
+    ASSERT_STR_EQ(yyjson_get_str(yyjson_obj_get(source, "default")), "outline");
+
+    /* And the budget. */
+    yyjson_val *budget = dx_path(root, "properties.request.properties.max_tokens");
+    ASSERT_TRUE(yyjson_is_obj(budget));
+    ASSERT_TRUE(yyjson_is_int(yyjson_obj_get(budget, "minimum")));
+    ASSERT_TRUE(yyjson_is_int(yyjson_obj_get(budget, "maximum")));
+
+    yyjson_doc_free(doc);
     PASS();
 }
 
@@ -444,4 +716,18 @@ SUITE(dx_surface) {
     RUN_TEST(dx_wrapped_result_carries_audit_and_next);
     RUN_TEST(dx_wrapped_result_rejects_a_non_object);
     RUN_TEST(dx_next_kinds_are_the_three_agreed_values);
+    RUN_TEST(dx_source_defaults_to_outline);
+    RUN_TEST(dx_source_full_is_an_explicit_opt_in);
+    RUN_TEST(dx_unknown_source_policy_is_rejected);
+    RUN_TEST(dx_the_source_policy_reaches_the_base_in_its_own_vocabulary);
+    RUN_TEST(dx_a_full_source_policy_does_not_force_the_base);
+    RUN_TEST(dx_the_budget_reaches_the_base_as_max_output_tokens);
+    RUN_TEST(dx_an_explicit_max_output_tokens_wins_over_the_dx_budget);
+    RUN_TEST(dx_the_token_estimate_is_four_bytes_per_token);
+    RUN_TEST(dx_an_answer_over_budget_is_refused_not_truncated);
+    RUN_TEST(dx_an_answer_inside_the_budget_passes_through);
+    RUN_TEST(dx_no_budget_means_no_gate);
+    RUN_TEST(dx_the_shape_reports_what_the_answer_carried);
+    RUN_TEST(dx_source_bodies_are_counted);
+    RUN_TEST(dx_the_schema_documents_the_answer_policy);
 }

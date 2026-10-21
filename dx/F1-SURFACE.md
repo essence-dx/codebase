@@ -30,21 +30,39 @@ Name: `dx_codebase`
 | --- | --- | --- |
 | `search` | find symbols | `search_graph` |
 | `trace` | callers, callees, call path | `trace_path` |
+| `impact` | blast radius of a symbol | `trace_path` (the direction is one of that tool's own parameters) |
 | `details` | one symbol's source and neighbourhood | `get_code_snippet` |
 | `outline` | a file's declaration outline | `get_file_outline` |
 | `architecture` | repo-level overview | `get_architecture` |
 | `schema` | the graph schema | `get_graph_schema` |
 | `coverage` | is this scope indexed and fresh | `check_index_coverage` |
 | `changes` | what a diff reaches | `detect_changes` |
-| `impact` | blast radius of a symbol | `search_graph` + `trace_path` |
 | `escape` | **not a graph question** | none - returns a clean bail-out |
+
+**The answer policy** (two optional request fields, and the DX surface's own):
+
+| Field | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `source` | `"outline"` \| `"full"` | `outline` | Whether the answer may carry source bodies. `outline` answers with relationships and a `file:line` pointer, so the answer does not grow with the repository. `full` asks for the source text and costs what the source costs. |
+| `max_tokens` | integer, 1..1000000 | the base tool's own | The token budget for the answer. An answer that does not fit is **refused** with the excess named, never silently truncated. |
+
+Both are DX fields, so neither is forwarded to the base tool verbatim: the DX
+surface translates them into the base's own vocabulary - `source_mode` and
+`max_output_tokens` - and a caller who sets the base's parameter directly keeps
+their value, because an explicit parameter beats a default.
 
 **Output** (a tool result with text content, plus):
 
 | Field | Meaning |
 | --- | --- |
 | `audit` | What the server checked this answer against. Never a claim the server cannot back. |
+| `shape` | What the answer carried and what it cost: `source` (the policy in force), `tokens` (the estimate), `budget`, `over_budget`, `excess`, `bodies_included`. |
 | `next` | `answer` (you have enough), `inspect` (one more named request), or `escape`. |
+
+**Token accounting.** One rate, used by both files: four UTF-8 bytes per token.
+The base states the same contract in `src/mcp/mcp.c`
+(`MCP_OUTPUT_BYTES_PER_TOKEN_ESTIMATE`), and the two must agree - a budget that
+means two different things in two files is not a budget.
 
 ---
 
@@ -73,17 +91,23 @@ default request type.
 ## 3. Dispatch
 
 `request.type` maps to one base tool. The type-specific fields are forwarded
-**verbatim** as the underlying tool's arguments, with two additions the base
-tools already understand:
-
-- `project` - if the caller supplies it, it is passed through untouched.
-- `include_source` - the F2 policy. Until F2 lands, the default is the base's
-  current behaviour; the field exists so F2 can change the default without
-  changing this contract.
+**verbatim** as the underlying tool's arguments, with two exceptions: the DX
+fields (`type`, `source`, `max_tokens`) are consumed by the DX surface and
+translated into the base's own vocabulary - `source_mode` and
+`max_output_tokens` - and a caller who set the base's parameter directly keeps
+their value, because an explicit parameter beats a default.
 
 **`escape` is special.** It never touches the graph. It returns the standard
 bail-out text: the question is not a graph question, use the caller's own tools.
 `next` is set to `escape`.
+
+**The budget is a gate.** The DX surface measures the composed answer at four
+bytes per token and, when it does not fit the caller's budget, **refuses** it:
+the result becomes an error carrying the excess, the token count and the budget.
+A shortened answer would read as a complete one, and the agent cannot tell the
+difference - so the answer is refused, and the `next` field says what to do
+about it. The refusal uses the base's own error shape, so a DX refusal is
+indistinguishable from a base error and the agent knows how to treat it.
 
 ---
 
@@ -119,8 +143,22 @@ both a DX session and a plain session.
 | 11 | `project` passthrough | present in the rebuilt args JSON |
 | 12 | `escape` in the type list | `escape` resolves to the bail-out, not to a base tool |
 | 13 | Every known type maps | each maps to the expected base tool name |
-| 14 | Response wrapping | `audit` and `next` present; `next` is one of the three values |
-| 15 | Budget field | `include_source` is not injected when absent |
+| 14 | Response wrapping | `audit`, `shape` and `next` present; `next` is one of the three values |
+| 15 | The source policy defaults | `outline` when the caller says nothing |
+| 16 | `source: "full"` | accepted; the base is not forced to `outline` |
+| 17 | `source` unknown | rejected, message names `request.source` |
+| 18 | The source policy reaches the base | `source_mode: "outline"` on a `details` request; `source` itself is not forwarded |
+| 19 | The budget reaches the base | `max_tokens` becomes `max_output_tokens`; `max_tokens` is not forwarded |
+| 20 | An explicit `max_output_tokens` | wins over the DX budget |
+| 21 | The token estimate | four bytes per token, rounded up |
+| 22 | An answer over the budget | **refused**, not truncated; the excess is named |
+| 23 | An answer inside the budget | passes through as a fresh buffer, never the caller's pointer |
+| 24 | No budget | no gate |
+| 25 | The shape | reports the source policy, the tokens, the budget, the excess and the bodies |
+| 26 | Source bodies counted | one for a result carrying `source`, zero without |
+| 27 | The schema advertises the policy | the `source` enum, its default and `max_tokens` bounds are all present |
+| 28 | The schema and the table agree | the `type` enum equals the dispatch table, both in `request` and in `draft` |
+| 29 | The schema requires the envelope | all four fields are in `required` |
 
 **The module is compiled and run standalone.** It depends on `yyjson` and the C
 standard library only - no store, no tree-sitter, no SQLite - so the contract

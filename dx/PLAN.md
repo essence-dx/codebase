@@ -217,6 +217,16 @@ a universal savings claim."* We inherit the rule and not the number.
 **M1 is the only milestone started in this session**, and it is the one with the
 clearest evidence behind it.
 
+### Status
+
+| Milestone | Feature | State |
+| --- | --- | --- |
+| M1 | F1 - the surface | **Landed 2026-10-21.** The contract module and its 33 tests are in `src/mcp/dx_surface.c` and `tests/test_dx_surface.c`; the tool, the `dx` profile and the dispatch are wired into `src/mcp/mcp.c`. The full server build has not been run in this environment - see `CHANGELOG.md`. |
+| M2 | F2 - index, not bodies, under a hard budget | **Landed 2026-10-21, inside M1.** The answer policy (`source`, `max_tokens`), the gate, and the `shape` report are part of the surface, because the shape of the answer is decided at the surface. |
+| M3 | F4 - governance verdicts | Not started |
+| M4 | F3 - the org graph | Not started |
+| M5 | F5 - stale memory + prove | Not started |
+
 ---
 
 ## What this fork is not

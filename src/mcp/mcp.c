@@ -20713,8 +20713,9 @@ static char *handle_dx_codebase(cbm_mcp_server_t *srv, const char *args_json) {
          * tools, rather than answering a question the graph cannot answer. */
         char *audit = dx_surface_audit_text(&req, "no graph query was needed");
         char *inner = cbm_mcp_text_result(dx_surface_escape_text(), false);
-        char *wrapped = dx_surface_wrap_result(inner, audit, DX_NEXT_ESCAPE,
-                                               "use your own file and search tools");
+        char *wrapped =
+            dx_surface_wrap_result(inner, audit, NULL, DX_NEXT_ESCAPE,
+                                   "use your own file and search tools");
         free(inner);
         free(audit);
         dx_surface_request_free(&req);
@@ -20733,12 +20734,28 @@ static char *handle_dx_codebase(cbm_mcp_server_t *srv, const char *args_json) {
         return cbm_mcp_text_result("dx_codebase: the underlying tool returned nothing", true);
     }
 
-    char *audit = dx_surface_audit_text(&req, "the indexed graph");
-    char *wrapped = dx_surface_wrap_result(inner, audit, DX_NEXT_ANSWER,
-                                           "the answer is complete; read the source it names "
-                                           "if you need more");
+    /* The answer policy. The budget is a gate: an answer that does not fit is
+     * refused with the excess named, because a silently shortened answer reads
+     * as a complete one. */
+    dx_answer_shape_t shape;
+    char *gated = dx_surface_apply_budget(inner, &req, &shape);
     free(inner);
+    if (!gated) {
+        dx_surface_request_free(&req);
+        return cbm_mcp_text_result("dx_codebase: the answer was lost", true);
+    }
+
+    char *audit = dx_surface_audit_text(&req, "the indexed graph");
+    char *shape_json = dx_surface_shape_json(&shape);
+    const char *next_kind = shape.over_budget ? DX_NEXT_INSPECT : DX_NEXT_ANSWER;
+    const char *next_detail =
+        shape.over_budget
+            ? "the answer did not fit the budget; raise max_tokens or narrow the request"
+            : "the answer is complete; read the source it names if you need more";
+    char *wrapped = dx_surface_wrap_result(gated, audit, shape_json, next_kind, next_detail);
+    free(gated);
     free(audit);
+    free(shape_json);
     dx_surface_request_free(&req);
     return wrapped ? wrapped : cbm_mcp_text_result("dx_codebase: the result was lost", true);
 }

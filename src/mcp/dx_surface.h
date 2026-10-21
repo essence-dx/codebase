@@ -51,6 +51,20 @@ typedef enum {
 #define DX_NEXT_INSPECT "inspect"
 #define DX_NEXT_ESCAPE "escape"
 
+/* Whether the answer may carry source bodies.
+ *
+ * The base already knows how to answer with relationships instead of bodies -
+ * get_code_snippet's source_mode "outline" - but it decides for itself
+ * (source_mode "auto" returns the body for anything that is not a large
+ * container). The DX surface makes the choice explicit and defaults it to the
+ * cheap shape, because a token cap spent on source text is still a token cap
+ * spent on the wrong thing.
+ */
+typedef enum {
+    DX_SOURCE_OUTLINE = 0, /* relationships only - the default */
+    DX_SOURCE_FULL = 1,    /* the caller explicitly asked for bodies */
+} dx_source_policy_t;
+
 /* A parsed and validated envelope. */
 typedef struct {
     char *question;         /* the caller's question, verbatim */
@@ -58,9 +72,23 @@ typedef struct {
     dx_request_type_t draft_type;   /* the type the draft considered */
     char *review;           /* the self-correction, verbatim */
     dx_request_type_t request_type; /* the committed type */
-    char *args_json;        /* the request object minus "type", verbatim */
+    char *args_json;        /* the request object minus the DX fields, verbatim */
     const char *base_tool;  /* the underlying base tool; NULL for escape */
+    dx_source_policy_t source_policy; /* what the answer may carry */
+    long long max_tokens;   /* the caller's budget; 0 means the base's own */
+    bool max_tokens_set;    /* whether the caller set one at all */
 } dx_surface_request_t;
+
+/* What the answer turned out to be, and what it cost. */
+typedef struct {
+    dx_source_policy_t source_policy; /* what the caller asked for */
+    long long tokens;                /* estimated tokens of the composed answer */
+    long long budget;                /* the caller's budget; 0 means unlimited */
+    bool over_budget;                /* the answer did not fit and was refused */
+    long long excess;                /* how far over it was */
+    int bodies_included;             /* source bodies in the answer */
+} dx_answer_shape_t;
+
 
 /* The JSON schema the tool advertises. Static lifetime; do not free. */
 const char *dx_surface_tool_schema(void);
@@ -93,12 +121,37 @@ const char *dx_surface_escape_text(void);
  * string (caller frees), or NULL on OOM. */
 char *dx_surface_audit_text(const dx_surface_request_t *req, const char *checked);
 
-/* Wrap a base tool result with the audit and next fields.
+/* Wrap a base tool result with the audit, shape and next fields.
  *
- * result_json is a tool-result object. The result gains two top-level keys:
- * "audit" (a string) and "next" (an object with "kind" and "detail").
+ * result_json is a tool-result object. The result gains three top-level keys:
+ * "audit" (a string), "shape" (a JSON object string) and "next" (an object with
+ * "kind" and "detail").
  * Returns a heap-allocated JSON string (caller frees), or NULL on OOM. */
 char *dx_surface_wrap_result(const char *result_json, const char *audit_text,
-                              const char *next_kind, const char *next_detail);
+                              const char *shape_json, const char *next_kind,
+                              const char *next_detail);
+
+/* Estimate a token count at the base's own rate: four UTF-8 bytes per token.
+ * The base states the same contract in mcp.c (MCP_OUTPUT_BYTES_PER_TOKEN_ESTIMATE),
+ * and the two must agree, or a budget means two different things. */
+long long dx_surface_estimate_tokens(const char *text);
+
+/* Count the source bodies in a tool result. */
+int dx_surface_count_bodies(const char *result_json);
+
+/* Apply the answer policy to a composed result.
+ *
+ * The budget is a GATE, not a warning: an answer that does not fit is refused
+ * with the excess named, because a silently truncated answer reads as a
+ * complete one. The shape is filled in either way, so the response can always
+ * say what it got and what it cost.
+ *
+ * Returns a heap-allocated JSON string (caller frees) - the result, or the
+ * refusal when the budget was exceeded. Returns NULL only on OOM. */
+char *dx_surface_apply_budget(const char *result_json, const dx_surface_request_t *req,
+                               dx_answer_shape_t *shape);
+
+/* The shape, as a JSON object: what the answer carries and what it cost. */
+char *dx_surface_shape_json(const dx_answer_shape_t *shape);
 
 #endif /* CBM_MCP_DX_SURFACE_H */

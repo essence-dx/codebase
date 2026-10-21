@@ -91,7 +91,14 @@ static const char *DX_TOOL_SCHEMA =
     "\"properties\":{"
     "\"type\":{\"type\":\"string\",\"enum\":[\"search\",\"trace\",\"impact\",\"details\",\"outline\","
     "\"architecture\",\"schema\",\"coverage\",\"changes\",\"escape\"],\"description\":\"The committed "
-    "request type. The other fields are forwarded to the matching base tool unchanged.\"}},"
+    "request type. The other fields are forwarded to the matching base tool unchanged.\"},"
+    "\"source\":{\"type\":\"string\",\"enum\":[\"outline\",\"full\"],\"default\":\"outline\","
+    "\"description\":\"Whether the answer may carry source bodies. 'outline' - the default - answers "
+    "with relationships and a file:line pointer, so the answer does not grow with the repository. "
+    "'full' asks for the source text and costs what the source costs.\"},"
+    "\"max_tokens\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":1000000,"
+    "\"description\":\"The token budget for the answer. An answer that does not fit is REFUSED with "
+    "the excess named, never silently truncated. Omit it to use the base tool's own default.\"}},"
     "\"description\":\"The committed request. Its type-specific fields are the base tool's own "
     "parameters and are forwarded verbatim.\"}},"
     "\"additionalProperties\":false,"
@@ -103,6 +110,11 @@ const char *dx_surface_tool_schema(void) {
 }
 
 /* ------------------------------------------------------------------ utils */
+
+/* The base's own byte-per-token rate. The base states it in mcp.c
+ * (MCP_OUTPUT_BYTES_PER_TOKEN_ESTIMATE); a budget that means two different
+ * things in two files is not a budget. */
+#define DX_BYTES_PER_TOKEN 4
 
 /* Build a heap message. Returns NULL on OOM. */
 static char *dx_msg(const char *fmt, ...) {
@@ -133,6 +145,19 @@ static const char *dx_str_field(yyjson_val *obj, const char *key) {
         return NULL;
     }
     return yyjson_get_str(v);
+}
+
+/* A positive integer field, or 0 when absent or not a positive integer. */
+static long long dx_pos_int_field(yyjson_val *obj, const char *key) {
+    yyjson_val *v = yyjson_obj_get(obj, key);
+    if (!yyjson_is_num(v)) {
+        return 0;
+    }
+    double d = yyjson_get_num(v);
+    if (d < 1.0 || d > 1000000.0) {
+        return 0;
+    }
+    return (long long)d;
 }
 
 /* ------------------------------------------------------------------- parse */
@@ -234,7 +259,26 @@ int dx_surface_parse(const char *args_json, dx_surface_request_t *out, char **er
     }
 
     /* The request's own fields, forwarded verbatim. "type" is ours, not the
-     * base tool's, so it is dropped. */
+     * base tool's, so it is dropped. "source" and "max_tokens" are ours too:
+     * they are the answer policy, and the base expresses them in its own
+     * vocabulary (source_mode, max_output_tokens). */
+    dx_source_policy_t source_policy = DX_SOURCE_OUTLINE;
+    const char *source_name = dx_str_field(request, "source");
+    if (source_name) {
+        if (strcmp(source_name, "outline") == 0) {
+            source_policy = DX_SOURCE_OUTLINE;
+        } else if (strcmp(source_name, "full") == 0) {
+            source_policy = DX_SOURCE_FULL;
+        } else {
+            if (err) {
+                *err = dx_msg("dx_codebase: 'request.source' must be 'outline' or 'full'");
+            }
+            goto fail;
+        }
+    }
+    long long max_tokens = dx_pos_int_field(request, "max_tokens");
+    bool max_tokens_set = max_tokens > 0;
+
     yyjson_mut_doc *adoc = yyjson_mut_doc_new(NULL);
     if (!adoc) {
         if (err) {
@@ -245,13 +289,18 @@ int dx_surface_parse(const char *args_json, dx_surface_request_t *out, char **er
     yyjson_mut_val *aroot = yyjson_mut_obj(adoc);
     yyjson_mut_doc_set_root(adoc, aroot);
 
+    bool caller_set_max_output_tokens = false;
     size_t idx;
     size_t max;
     yyjson_val *key;
     yyjson_val *val;
     yyjson_obj_foreach(request, idx, max, key, val) {
-        if (yyjson_equals_str(key, "type")) {
+        if (yyjson_equals_str(key, "type") || yyjson_equals_str(key, "source") ||
+            yyjson_equals_str(key, "max_tokens")) {
             continue;
+        }
+        if (yyjson_equals_str(key, "max_output_tokens")) {
+            caller_set_max_output_tokens = true;
         }
         yyjson_mut_val *copy = yyjson_val_mut_copy(adoc, val);
         if (!copy) {
@@ -262,6 +311,33 @@ int dx_surface_parse(const char *args_json, dx_surface_request_t *out, char **er
             goto fail;
         }
         if (!yyjson_mut_obj_add_val(adoc, aroot, yyjson_get_str(key), copy)) {
+            yyjson_mut_doc_free(adoc);
+            if (err) {
+                *err = dx_msg("dx_codebase: out of memory");
+            }
+            goto fail;
+        }
+    }
+
+    /* The budget, in the base's vocabulary. Every base tool the DX surface can
+     * reach advertises max_output_tokens. A caller who set it directly keeps
+     * their value: an explicit parameter beats a default. */
+    if (max_tokens_set && !caller_set_max_output_tokens) {
+        yyjson_mut_val *budget = yyjson_mut_int(adoc, (int64_t)max_tokens);
+        if (!budget || !yyjson_mut_obj_add_val(adoc, aroot, "max_output_tokens", budget)) {
+            yyjson_mut_doc_free(adoc);
+            if (err) {
+                *err = dx_msg("dx_codebase: out of memory");
+            }
+            goto fail;
+        }
+    }
+
+    /* The source policy, in the base's vocabulary. Only get_code_snippet takes
+     * source_mode; the other tools answer with relationships already. */
+    if (source_policy == DX_SOURCE_OUTLINE && request_type == DX_REQ_DETAILS) {
+        yyjson_mut_val *mode = yyjson_mut_str(adoc, "outline");
+        if (!mode || !yyjson_mut_obj_add_val(adoc, aroot, "source_mode", mode)) {
             yyjson_mut_doc_free(adoc);
             if (err) {
                 *err = dx_msg("dx_codebase: out of memory");
@@ -294,6 +370,9 @@ int dx_surface_parse(const char *args_json, dx_surface_request_t *out, char **er
     out->draft_type = draft_type;
     out->request_type = request_type;
     out->base_tool = dx_surface_base_tool(request_type);
+    out->source_policy = source_policy;
+    out->max_tokens = max_tokens;
+    out->max_tokens_set = max_tokens_set;
 
     yyjson_doc_free(doc);
     return 0;
@@ -346,10 +425,153 @@ char *dx_surface_audit_text(const dx_surface_request_t *req, const char *checked
                   source, drafted, committed);
 }
 
+/* --------------------------------------------------------------- budget */
+
+/* A tool result carrying an error, in the base's own shape for an error with a
+ * non-object payload: the text in content, and {"error": text} in
+ * structuredContent. A refusal that looked different from a base error would
+ * read as a different kind of failure, and the agent would not know how to
+ * treat it. */
+static char *dx_tool_result_error(const char *text) {
+    if (!text) {
+        return NULL;
+    }
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    if (!doc) {
+        return NULL;
+    }
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+
+    yyjson_mut_val *content = yyjson_mut_arr(doc);
+    yyjson_mut_val *item = yyjson_mut_obj(doc);
+    (void)yyjson_mut_obj_add_str(doc, item, "type", "text");
+    (void)yyjson_mut_obj_add_str(doc, item, "text", text);
+    (void)yyjson_mut_arr_add_val(content, item);
+    (void)yyjson_mut_obj_add_val(doc, root, "content", content);
+
+    yyjson_mut_val *structured = yyjson_mut_obj(doc);
+    (void)yyjson_mut_obj_add_str(doc, structured, "error", text);
+    (void)yyjson_mut_obj_add_val(doc, root, "structuredContent", structured);
+
+    char *out = yyjson_mut_write(doc, 0, NULL);
+    yyjson_mut_doc_free(doc);
+    return out;
+}
+
+long long dx_surface_estimate_tokens(const char *text) {
+    if (!text) {
+        return 0;
+    }
+    size_t bytes = strlen(text);
+    return (long long)((bytes + (size_t)DX_BYTES_PER_TOKEN - 1U) / (size_t)DX_BYTES_PER_TOKEN);
+}
+
+/* Count the source bodies in a tool result. The body lives under a "source"
+ * key in the structured content; the rendered text is not scanned, because the
+ * base already decides that shape and rewriting a rendered tree would be
+ * guesswork. */
+int dx_surface_count_bodies(const char *result_json) {
+    if (!result_json) {
+        return 0;
+    }
+    yyjson_doc *doc = yyjson_read(result_json, strlen(result_json), 0);
+    if (!doc) {
+        return 0;
+    }
+    int count = 0;
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    yyjson_val *structured = yyjson_is_obj(root) ? yyjson_obj_get(root, "structuredContent") : NULL;
+    if (yyjson_is_obj(structured)) {
+        yyjson_val *src = yyjson_obj_get(structured, "source");
+        if (src) {
+            count++;
+        }
+    }
+    yyjson_doc_free(doc);
+    return count;
+}
+
+char *dx_surface_shape_json(const dx_answer_shape_t *shape) {
+    if (!shape) {
+        return NULL;
+    }
+    yyjson_mut_doc *doc = yyjson_mut_doc_new(NULL);
+    if (!doc) {
+        return NULL;
+    }
+    yyjson_mut_val *root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+
+    (void)yyjson_mut_obj_add_str(doc, root, "source",
+                                 shape->source_policy == DX_SOURCE_FULL ? "full" : "outline");
+    (void)yyjson_mut_obj_add_int(doc, root, "tokens", (int64_t)shape->tokens);
+    if (shape->budget > 0) {
+        (void)yyjson_mut_obj_add_int(doc, root, "budget", (int64_t)shape->budget);
+    }
+    (void)yyjson_mut_obj_add_bool(doc, root, "over_budget", shape->over_budget);
+    if (shape->over_budget) {
+        (void)yyjson_mut_obj_add_int(doc, root, "excess", (int64_t)shape->excess);
+    }
+    (void)yyjson_mut_obj_add_int(doc, root, "bodies_included", (int64_t)shape->bodies_included);
+
+    char *out = yyjson_mut_write(doc, 0, NULL);
+    yyjson_mut_doc_free(doc);
+    return out;
+}
+
+char *dx_surface_apply_budget(const char *result_json, const dx_surface_request_t *req,
+                               dx_answer_shape_t *shape) {
+    if (!shape) {
+        return NULL;
+    }
+    memset(shape, 0, sizeof(*shape));
+    shape->source_policy = DX_SOURCE_OUTLINE;
+
+    if (!result_json) {
+        return NULL;
+    }
+    if (req) {
+        shape->source_policy = req->source_policy;
+        shape->budget = req->max_tokens_set ? req->max_tokens : 0;
+    }
+    shape->tokens = dx_surface_estimate_tokens(result_json);
+    shape->bodies_included = dx_surface_count_bodies(result_json);
+
+    if (shape->budget > 0 && shape->tokens > shape->budget) {
+        shape->over_budget = true;
+        shape->excess = shape->tokens - shape->budget;
+        /* A refusal, not a truncation. An answer that silently lost rows reads
+         * as a complete answer, and the agent cannot tell the difference. */
+        char *text = dx_msg(
+            "The answer was %lld tokens and the budget was %lld, so it is refused rather than "
+            "truncated: a shortened answer reads as a complete one. Raise max_tokens, narrow the "
+            "request, or ask for one symbol at a time.",
+            shape->tokens, shape->budget);
+        if (!text) {
+            return NULL;
+        }
+        char *out = dx_tool_result_error(text);
+        free(text);
+        return out;
+    }
+    /* Always a fresh buffer: the caller frees this, and a borrowed pointer
+     * that is sometimes owned and sometimes not is a bug waiting to happen. */
+    size_t len = strlen(result_json);
+    char *copy = (char *)malloc(len + 1);
+    if (!copy) {
+        return NULL;
+    }
+    memcpy(copy, result_json, len + 1);
+    return copy;
+}
+
 /* ------------------------------------------------------------------- wrap */
 
+
 char *dx_surface_wrap_result(const char *result_json, const char *audit_text,
-                              const char *next_kind, const char *next_detail) {
+                              const char *shape_json, const char *next_kind,
+                              const char *next_detail) {
     if (!result_json) {
         return NULL;
     }
@@ -391,6 +613,20 @@ char *dx_surface_wrap_result(const char *result_json, const char *audit_text,
 
     if (audit_text) {
         (void)yyjson_mut_obj_add_str(mdoc, mroot, "audit", audit_text);
+    }
+
+    if (shape_json) {
+        yyjson_doc *shape_doc = yyjson_read(shape_json, strlen(shape_json), 0);
+        yyjson_val *shape_root = shape_doc ? yyjson_doc_get_root(shape_doc) : NULL;
+        if (yyjson_is_obj(shape_root)) {
+            yyjson_mut_val *shape = yyjson_val_mut_copy(mdoc, shape_root);
+            if (shape) {
+                (void)yyjson_mut_obj_add_val(mdoc, mroot, "shape", shape);
+            }
+        }
+        if (shape_doc) {
+            yyjson_doc_free(shape_doc);
+        }
     }
 
     yyjson_mut_val *next = yyjson_mut_obj(mdoc);

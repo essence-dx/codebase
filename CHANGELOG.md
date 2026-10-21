@@ -19,6 +19,64 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `feat:` the answer policy - relationships by default, and a budget that gates
+
+**Milestone M2, landed inside M1.** The shape of the answer is decided at the
+surface, so it belongs with the surface.
+
+**What was built (DX).**
+
+| Piece | Where | What it does |
+| --- | --- | --- |
+| `request.source` | `src/mcp/dx_surface.c` | `"outline"` (the default) or `"full"`. `outline` answers with relationships and a `file:line` pointer, so the answer does not grow with the repository. `full` asks for the source text and costs what the source costs. |
+| `request.max_tokens` | `src/mcp/dx_surface.c` | The caller's budget. An answer that does not fit is **refused**, not truncated. |
+| The gate | `dx_surface_apply_budget` | Measures the composed answer and refuses it when it does not fit, naming the excess, the token count and the budget. |
+| `shape` | `dx_surface_shape_json` | Every answer reports the source policy in force, the token count, the budget, whether it was over, the excess, and how many source bodies it included. |
+
+**The base was further along than this feature assumed, and the record says so.**
+Every base tool the DX surface can reach already advertises `max_output_tokens`
+(default 3200, minimum 128, maximum 1,000,000), the cap is applied on a
+deterministic **UTF-8 byte ceiling of four bytes per token**, it is applied only
+at whole semantic-unit boundaries, and when the first unit does not fit it
+refuses and says *"raise max_output_tokens"* rather than truncating mid-unit.
+`get_code_snippet` already has `source_mode: auto | full | outline` and reports
+the mode it used. So the base caps; what it did not do is make the **choice**
+explicit or price it. The DX surface therefore:
+- defaults the shape to `outline` and makes `full` an explicit opt-in,
+- adds a **caller-level** gate on top of the base's tool-level cap, and
+- reports what the answer carried and what it cost.
+
+**One rate, two files.** The DX surface estimates tokens at four UTF-8 bytes per
+token - the base's own stated contract (`MCP_OUTPUT_BYTES_PER_TOKEN_ESTIMATE` in
+`src/mcp/mcp.c`). A budget that means two different things in two files is not
+a budget, so the constant is named in one place and documented in both.
+
+**Translation, not duplication.** `source` and `max_tokens` are DX fields, so
+neither is forwarded to the base verbatim. The surface translates them into the
+base's own vocabulary - `source_mode` and `max_output_tokens` - and a caller
+who set the base's parameter directly keeps their value, because an explicit
+parameter beats a default.
+
+**A refusal that looks like a refusal.** A DX refusal uses the base's own error
+shape: the text in `content`, and `{"error": text}` in `structuredContent`. A
+refusal that looked different from a base error would read as a different kind
+of failure, and the agent would not know how to treat it.
+
+**Executed.**
+
+| Check | Result |
+| --- | --- |
+| The module compiles clean under the project flags | exit 0 |
+| The contract tests pass | **33 passed, exit 0** |
+| `mcp.c` and `dx_surface.c` pass `-fsyntax-only` with the project include set | exit 0 |
+| The full server build | **NOT RUN** - the tree-sitter runtime and the 162 vendored grammars are not built in this environment |
+
+**One API bug caught before it shipped.** The first cut of
+`dx_surface_apply_budget` returned the caller's own pointer when the answer fit
+and a fresh string when it did not. A function whose return is sometimes owned
+and sometimes borrowed is a bug waiting to happen, so it now always returns a
+fresh buffer and the caller always frees it.
+
 ### 2026-10-21 - `feat:` the DX surface - one typed tool over the code graph
 
 **Milestone M1 of [`dx/PLAN.md`](dx/PLAN.md).** The first DX feature is landed:

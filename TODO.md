@@ -136,12 +136,12 @@ boundary with a schema error, never answered from a default; `escape` returns a
 clean non-graph answer; and a fixture test proves each `request.type` reaches
 the right underlying handler.
 
-**Status 2026-10-21.** The contract module `src/mcp/dx_surface.c` and its 19
+**Status 2026-10-21.** The contract module `src/mcp/dx_surface.c` and its 33
 tests are landed and passing (`-Wall -Wextra -Werror`, standalone compile, exit
-0). The tool, the `dx` profile and the dispatch are wired into `src/mcp/mcp.c`.
-**Not yet done:** the full server build and the test binary in
-`tests/test_main.c` have not been run in this environment - only the standalone
-module test has been executed.
+0). The tool, the `dx` profile, the dispatch and the answer policy are wired
+into `src/mcp/mcp.c`. **Not yet done:** the full server build and the test
+binary in `tests/test_main.c` have not been run in this environment - only the
+standalone module test has been executed.
 
 ### CB-06 - The org graph with a DX-native semantic layer
 
@@ -204,24 +204,48 @@ does not claim completeness.
 
 ### CB-09 - The answer is the index, never the bodies, under a hard budget
 
-**Evidence.** The base's `search_graph` and `get_code_snippet` return source
-bodies. The measured autopsy calls that the token bomb: `codegraph` returns
-whole source bodies - *"the Read, done for you"* - and spent **4% more tokens
-than running with no MCP at all**. The benchmark that makes tokens-per-correct-
-answer the primary axis is `sverklo`'s (naive grep 22,704 tokens per task
-against 652 for the leader). The base already has the mechanism
-(`src/mcp/compact_out.c`, and the snippet path already emits `source_truncated`,
-`source_clipped`, `truncation_reason` and `next_start_line`) - **it is simply
-not the default**. A hard budget has a precedent: Repomix's `--token-budget N`
-fails with a non-zero exit code rather than warning.
+**Evidence.** The measured autopsy calls returning whole source bodies the
+token bomb: the tool that does it spent **4% more tokens than running with no
+MCP at all**. The benchmark that makes tokens-per-correct-answer the primary
+axis is `sverklo`'s (naive grep 22,704 tokens per task against 652 for the
+leader). And a tool that cuts the bill and then spends four minutes indexing
+has moved the cost rather than removed it.
 
-**What to build.** The tool answers with relationships - names, edges,
-signatures, spans - so the answer size does not grow with the repository, and a
-budget that is a **gate**: exceeding it fails, with the budget named.
+**What the base already had, corrected.** The base is further along than this
+item first assumed, and the record says so: every base tool the DX surface can
+reach already advertises `max_output_tokens` (default 3200, minimum 128, maximum
+1,000,000), the cap is applied on a deterministic **UTF-8 byte ceiling of four
+bytes per token**, it is applied only at whole semantic-unit boundaries, and
+when the first unit does not fit it refuses and says *"raise max_output_tokens"*
+rather than truncating mid-unit. `get_code_snippet` also already has
+`source_mode: auto | full | outline` and reports the mode it used. So the base
+caps; what it does not do is make the **choice** explicit or price it.
+
+**What to build.** Three things the base does not have:
+
+1. **A default shape.** The answer is relationships and a `file:line` pointer,
+   not source text. The DX surface sets `source_mode: "outline"` by default;
+   `source: "full"` is an explicit, priced opt-in.
+2. **A hard gate.** The DX surface measures the composed answer and **refuses**
+   one that does not fit, naming the excess. The base's cap is a tool-level
+   limit; this is a caller-level contract.
+3. **A report.** Every answer carries a `shape` object: the source policy in
+   force, the token count, the budget, whether it was over, the excess, and how
+   many bodies it included.
+
+**Status 2026-10-21.** Landed with M1. `request.source` and `request.max_tokens`
+are parsed and validated, translated into the base's `source_mode` and
+`max_output_tokens`, and the gate and the `shape` report are in
+`src/mcp/dx_surface.c`, with 13 of the 33 contract tests covering them. The
+base's own byte rate is reused, so the two files agree on what a token is.
 
 **Done when.** A default call returns no source bodies, the response carries
 its token count, and a call whose budget is exceeded fails with a non-zero exit
 code naming the budget.
+
+**Not yet done.** The gate is enforced on the composed MCP result. The base's
+own per-tool byte cap still applies underneath it, so the two limits compose
+rather than replace each other.
 
 ### CB-10 - Governance as verdicts, not prose
 
