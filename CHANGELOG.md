@@ -19,6 +19,51 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `fix:` the DX tool broke three of upstream's own contracts
+
+**Found by running the whole house suite** - the first complete run of it on
+this machine, 194 suites. Three of upstream's `mcp` tests failed, and all
+three were **this fork's fault**:
+
+```
+tests/test_mcp.c:1383: mcp_metadata_byte_budget          FAIL  strlen(json) (24121)
+tests/test_mcp.c:1446: mcp_tools_list_loads_structural_path_upfront  FAIL  meta is not NULL
+tests/test_mcp.c:1521: mcp_tools_have_behavior_annotations FAIL  yyjson_arr_size(tools)
+```
+
+**What happened.** Registering `dx_codebase` in the tool registry changed the
+`tools/list` payload for **every** profile, and upstream's tests pin that
+payload three ways:
+
+- a **byte budget** - the DX schema is 2547 bytes, and the payload went over;
+- the **tool count** - 18 tools, not the 17 upstream's test expects;
+- the **alwaysLoad set** - `dx_codebase` carries the marker, and upstream's
+  helper only knows the three upstream tools, so the test found a `_meta` where
+  it expected none.
+
+**The fix.** The DX surface belongs to the **DX profile**, and only to it:
+
+```c
+if (profile == CBM_MCP_TOOL_PROFILE_ALL) {
+    return strcmp(name, "dx_codebase") != 0;
+}
+```
+
+Under the upstream menu the DX tool was a 2.5 KB tax on every session for no
+benefit - the seventeen upstream tools do the same job more directly - and it
+changed a contract upstream's own tests hold. Keeping it out of the upstream
+profiles leaves those contracts **exactly as upstream wrote them**, and the DX
+profile still exposes exactly one tool.
+
+**The design question this settles.** The DX surface is a *profile*, not a
+tool bolted onto the upstream menu. That is also why `CB-21` matters: the
+profile is opt-in today, and the fork's argument is that the DX surface
+should be what you get by default - not that the upstream menu should carry
+an extra tool.
+
+**Executed.** The three upstream tests pass again, and the DX profile still
+advertises exactly one tool.
+
 ### 2026-10-21 - `fix:` a Windows heap corruption in the base's memory accounting
 
 **The house test suite crashed on the first attempt to run it, and the cause

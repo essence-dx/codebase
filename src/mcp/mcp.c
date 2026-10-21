@@ -1032,7 +1032,14 @@ static bool mcp_tool_allowed(cbm_mcp_tool_profile_t profile, const char *name) {
         return false;
     }
     if (profile == CBM_MCP_TOOL_PROFILE_ALL) {
-        return true;
+        /* The DX surface belongs to the DX profile, and only to it. Under the
+         * upstream menu it is a 2.5 KB tax on every session for no benefit -
+         * the seventeen upstream tools do the same job more directly - and it
+         * changes the tools/list contract that upstream's own tests pin: the
+         * byte budget, the tool count, and the alwaysLoad set. Keeping it out
+         * of the upstream profiles leaves those contracts exactly as upstream
+         * wrote them, and the DX profile still exposes exactly one tool. */
+        return strcmp(name, "dx_codebase") != 0;
     }
     /* The DX surface: exactly one tool. The whole point is that the agent has
      * one thing to reach for and a schema that forces the reasoning, instead
