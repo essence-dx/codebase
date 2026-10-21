@@ -19,6 +19,53 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `fix:` a required field of three spaces, and two silent downgrades
+
+**Found by an adversarial probe rather than by reading.** The three DX policy
+modules are **pure** on purpose - no store, no graph, no server - so malformed
+input can be thrown at them and the answers checked in seconds. That is a much
+better way to look for this class of defect than reading, and it found three.
+
+**1. A required field of three spaces satisfied the check.** The envelope's
+required fields - `question`, `draft.reason`, `review` - are checked for a
+non-empty string, and the check was on the **length**. `"   "` has a length of
+three, so it passed, and so did a draft reason and a review that said nothing
+at all. A model that pads the field had satisfied the check without saying
+anything.
+
+The schema said `"minLength": 1`, which is a *minimum* and permits `" "`, so
+the schema and the layer disagreed. The schema now says what the layer
+enforces:
+
+```json
+"minLength": 1, "pattern": "\\S"
+```
+
+**2. A malformed `source` was silently dropped.** `source` is the DX layer's
+own field, so the layer owns its vocabulary. A caller who sent `"source": 5`,
+or `null`, or `"   "` had the field dropped and the policy left at the default:
+a **silent downgrade**, where a caller who asked for source bodies got
+relationships and nothing said so. The same shape as the `source: "full"` no-op
+this already refuses. Absent is one thing and present-but-not-a-policy is
+another, and only the second is an error.
+
+**3. A fractional budget was truncated.** The schema says
+`"type": "integer"`, and `max_tokens: 1.5` was silently truncated to `1` - a
+budget *tighter* than the one asked for. At least the safe direction, but not
+what was asked for.
+
+**Five new tests, and they are pairs** - the valid case must still work:
+
+| Test | Asserts |
+| --- | --- |
+| `dx_a_required_field_of_spaces_is_refused` | three spaces is not a field |
+| `dx_a_required_field_with_real_content_is_accepted` | a field that says something still works |
+| `dx_a_malformed_source_is_refused_not_silently_dropped` | a malformed policy is an error, not a downgrade |
+| `dx_a_fractional_budget_is_refused_not_truncated` | the budget is an integer or an error |
+| `dx_a_whole_number_budget_is_still_accepted` | a whole budget still works |
+
+**Executed.** The surface contract tests are **74 passed**, exit 0 (was 69).
+
 ### 2026-10-21 - `fix:` the budget could replace a failure with a size complaint
 
 **The budget is a gate on ANSWERS.** An answer that does not fit is refused
