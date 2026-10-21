@@ -884,11 +884,16 @@ static const tool_def_t TOOLS[] = {
 
 static const int TOOL_COUNT = sizeof(TOOLS) / sizeof(TOOLS[0]);
 
-/* The DX surface's schema is built from its request-type table, so it cannot
- * be a compile-time literal here without the two drifting apart. It lives
- * beside the table in src/mcp/dx_surface.c, and the schema/table agreement is
- * pinned by tests/test_dx_surface.c. */
-static const char *mcp_tool_input_schema_for(int i) {
+  /* The DX surface's schema lives in src/mcp/dx_surface.c, beside the
+   * request-type table, because the two have to agree and a reader has to be
+   * able to find both in one place.
+   *
+   * They are two hand-maintained artefacts, not one derived from the other -
+   * the schema is a literal, and the table is a literal - so their agreement
+   * is pinned by tests instead: the required fields in the schema against the
+   * table in tests/test_mcp.c, and the type descriptions against the table in
+   * tests/test_dx_surface.c. */
+  static const char *mcp_tool_input_schema_for(int i) {
     if (strcmp(TOOLS[i].name, "dx_codebase") == 0) {
         return dx_surface_tool_schema();
     }
