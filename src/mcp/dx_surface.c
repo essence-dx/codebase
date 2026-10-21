@@ -196,18 +196,18 @@ static const char *DX_TOOL_SCHEMA =
     "{\"type\":\"object\","
     "\"required\":[\"question\",\"draft\",\"review\",\"request\"],"
     "\"properties\":{"
-    "\"question\":{\"type\":\"string\",\"minLength\":1,\"description\":\"The code question, in "
+    "\"question\":{\"type\":\"string\",\"minLength\":1,\"pattern\":\"\\\\S\",\"description\":\"The code question, in "
     "the caller's own words. Do not pre-shape it into symbol names.\"},"
     "\"draft\":{\"type\":\"object\",\"required\":[\"reason\",\"type\"],\"additionalProperties\":false,"
     "\"properties\":{"
-    "\"reason\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Why this request type looks "
+    "\"reason\":{\"type\":\"string\",\"minLength\":1,\"pattern\":\"\\\\S\",\"description\":\"Why this request type looks "
     "like the smallest answer.\"},"
     "\"type\":{\"type\":\"string\",\"enum\":[\"search\",\"trace\",\"impact\",\"details\",\"outline\","
     "\"architecture\",\"schema\",\"coverage\",\"changes\",\"escape\",\"verify\",\"certificate\","
     "\"enforce\"],\"description\":\"The request "
     "type being considered.\"}},"
     "\"description\":\"The drafted plan: a request type, plus the reason it looks smallest.\"},"
-    "\"review\":{\"type\":\"string\",\"minLength\":1,\"description\":\"Self-correct the draft. If the "
+    "\"review\":{\"type\":\"string\",\"minLength\":1,\"pattern\":\"\\\\S\",\"description\":\"Self-correct the draft. If the "
     "draft was wrong or too broad, name the better type here.\"},"
     "\"request\":{\"type\":\"object\",\"required\":[\"type\"],\"additionalProperties\":true,"
     "\"properties\":{"
@@ -289,13 +289,28 @@ static char *dx_msg(const char *fmt, ...) {
     return buf;
 }
 
-/* A non-empty string field, or NULL. */
+/* A field that must carry something: a string with at least one
+ * non-whitespace character, or NULL.
+ *
+ * The length check alone was not enough. A question of "   " - three spaces -
+ * passed it, and so did a draft reason and a review that said nothing at all.
+ * The contract calls these fields non-empty, and a model that pads the field
+ * has satisfied the check without saying anything. */
 static const char *dx_str_field(yyjson_val *obj, const char *key) {
     yyjson_val *v = yyjson_obj_get(obj, key);
     if (!yyjson_is_str(v) || yyjson_get_len(v) == 0) {
         return NULL;
     }
-    return yyjson_get_str(v);
+    const char *text = yyjson_get_str(v);
+    if (!text) {
+        return NULL;
+    }
+    for (const char *p = text; *p; p++) {
+        if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r') {
+            return text;
+        }
+    }
+    return NULL; /* whitespace only: nothing was said */
 }
 
 /* A positive integer field, or 0 when absent or not a positive integer. */

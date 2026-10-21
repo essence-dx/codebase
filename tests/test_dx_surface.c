@@ -1354,6 +1354,55 @@ TEST(dx_the_audit_still_says_the_graph_was_consulted_for_a_graph_answer) {
     PASS();
 }
 
+TEST(dx_a_required_field_of_spaces_is_refused) {
+    /* "   " has a length of three, so the length check alone let it through -
+     * and so did a draft reason and a review that said nothing at all. The
+     * contract calls these fields non-empty, and a model that pads the field
+     * has satisfied the check without saying anything. */
+    dx_surface_request_t req;
+    char *err = NULL;
+
+    const char *spaces =
+        "{\"question\":\"   \",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\"}}";
+    ASSERT_EQ(dx_surface_parse(spaces, &req, &err), -1);
+    ASSERT_NOT_NULL(err);
+    ASSERT_TRUE(strstr(err, "question") != NULL);
+    free(err);
+    err = NULL;
+
+    const char *blank_reason =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"\\t\",\"type\":\"search\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\"}}";
+    ASSERT_EQ(dx_surface_parse(blank_reason, &req, &err), -1);
+    ASSERT_NOT_NULL(err);
+    ASSERT_TRUE(strstr(err, "draft.reason") != NULL);
+    free(err);
+    err = NULL;
+
+    const char *blank_review =
+        "{\"question\":\"q\",\"draft\":{\"reason\":\"r\",\"type\":\"search\"},\"review\":\"  \","
+        "\"request\":{\"type\":\"search\",\"query\":\"foo\"}}";
+    ASSERT_EQ(dx_surface_parse(blank_review, &req, &err), -1);
+    ASSERT_NOT_NULL(err);
+    ASSERT_TRUE(strstr(err, "review") != NULL);
+    free(err);
+    PASS();
+}
+
+TEST(dx_a_required_field_with_real_content_is_accepted) {
+    /* The other half: a field that says something is still accepted. */
+    dx_surface_request_t req;
+    char *err = NULL;
+    const char *args =
+        "{\"question\":\"who calls the handler\",\"draft\":{\"reason\":\"a symbol lookup\","
+        "\"type\":\"details\"},\"review\":\"v\","
+        "\"request\":{\"type\":\"details\",\"qualified_name\":\"a.b\"}}";
+    ASSERT_EQ(dx_surface_parse(args, &req, &err), 0);
+    dx_surface_request_free(&req);
+    PASS();
+}
+
 SUITE(dx_surface) {
     RUN_TEST(dx_envelope_with_all_four_fields_parses);
     RUN_TEST(dx_missing_question_is_rejected);
@@ -1419,6 +1468,8 @@ SUITE(dx_surface) {
     RUN_TEST(dx_the_escape_audit_does_not_claim_the_graph_was_consulted);
     RUN_TEST(dx_the_graph_audit_still_claims_the_graph_was_consulted);
     RUN_TEST(dx_the_schema_documents_the_answer_policy);
+    RUN_TEST(dx_a_required_field_of_spaces_is_refused);
+    RUN_TEST(dx_a_required_field_with_real_content_is_accepted);
     RUN_TEST(dx_the_audit_says_the_graph_was_not_consulted_for_the_certificate);
     RUN_TEST(dx_the_audit_says_the_graph_was_not_consulted_for_the_gate);
     RUN_TEST(dx_the_audit_still_says_the_graph_was_consulted_for_a_graph_answer);
