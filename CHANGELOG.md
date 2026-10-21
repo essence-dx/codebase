@@ -162,6 +162,23 @@ not indexed"* rather than *"project is required"*. So the session's project
 was filled in by the DX layer on its way to the base - the feature works in
 the product, not just in a unit test.
 
+**The surface, measured on the built binary.** The `tools/list` payload the
+agent receives, under each profile, at the base's own four-bytes-per-token
+rate:
+
+| Profile | Tools | Schema bytes | Tokens |
+| --- | --- | --- | --- |
+| ALL (upstream's surface) | 18 | 24111 | 6028 |
+| DX (this fork's surface) | 1 | 3182 | 796 |
+
+**An 86.8% reduction in the schema the agent receives.** That is a
+*surface-size* measurement and nothing more: it is not a session-level token
+cost, and it is not the base's +66% figure, which is a whole-session
+measurement. The session measurement is `CB-13`, and it has not been run.
+What this number does say is where the surface's cost lives: almost all of it
+is in the seventeen schemas the DX profile does not send, and the one schema
+it does send - 2547 bytes - carries the whole contract.
+
 **New house tests**, where both halves are linked and can be compared:
 
 - `dx_the_required_fields_match_the_base_tools_own_schemas` - for every DX
