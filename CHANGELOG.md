@@ -19,6 +19,75 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-21 - `fix:` a stack buffer overflow in upstream's own test suite
+
+**Found by the toolchain, not by reading.** GCC 16's `-Wstringop-overflow`
+rejected the house test build on a line that is a genuine defect:
+
+```
+tests/test_daemon_ipc.c:712:9: error: 'ipc_test_copy_path' accessing 1024 bytes
+    in a region of size 256 [-Werror=stringop-overflow]
+```
+
+**The bug.** The helper declared its destination as a full-size path buffer
+and wrote a full-size path buffer into it:
+
+```c
+static void ipc_test_copy_path(char out[TEST_PATH_CAP], const char *path) {
+    ...
+    (void)snprintf(out, TEST_PATH_CAP, "%s", path);
+}
+```
+
+`TEST_PATH_CAP` is 1024. But five call sites pass a
+`CBM_DAEMON_IPC_WINDOWS_NAME_CAP` buffer - **256 bytes**:
+
+```c
+char address_a[CBM_DAEMON_IPC_WINDOWS_NAME_CAP] = {0};
+...
+ipc_test_copy_path(address_a, cbm_daemon_ipc_endpoint_address(endpoint_a));
+```
+
+So a path longer than 255 characters wrote up to 1024 bytes into a 256-byte
+stack buffer. It is a **stack buffer overflow in the test suite**, and it
+survived upstream because upstream's CI compiles with clang, which does not
+emit that warning for this shape.
+
+**The fix.** The destination's size is taken at the call site, from the array
+itself, and the write is bounded by the buffer that is actually there:
+
+```c
+static void ipc_test_copy_path_n(char *out, size_t out_size, const char *path) { ... }
+
+#define ipc_test_copy_path(out, path) ipc_test_copy_path_n((out), sizeof(out), (path))
+```
+
+The macro leaves every call site unchanged - there are around eighty of them -
+and each one now gets its own buffer's size. If a caller ever passes a
+pointer rather than an array, `sizeof` yields the pointer's size, so the copy
+truncates instead of overflowing.
+
+**Also fixed here, and it was ours.** The five new DX profile tests were
+written *after* the `SUITE(mcp)` block that references them, so the framework
+saw an implicit declaration and then a `static` definition:
+
+```
+error: implicit declaration of function 'test_dx_profile_parses_from_the_flag'
+error: static declaration of 'test_dx_profile_parses_from_the_flag' follows
+       non-static declaration
+```
+
+The house convention is that every test is **defined** before the suite that
+runs it. The definitions now are.
+
+**Executed.**
+
+| Check | Result |
+| --- | --- |
+| `tests/test_daemon_ipc.c` with the test flags | exit 0 - the overflow is gone |
+| `tests/test_mcp.c` with the test flags | exit 0 |
+| The house test runner | building |
+
 ### 2026-10-21 - `feat:` the request says what it needs, and the session says which project
 
 **Two more flaws, both found by reading the base's own tool schemas out of the

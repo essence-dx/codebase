@@ -77,13 +77,28 @@ static bool ipc_test_parent_new(char out[TEST_PATH_CAP], const char *tag) {
     return th_secure_runtime_parent_new(out, TEST_PATH_CAP, tag);
 }
 
-static void ipc_test_copy_path(char out[TEST_PATH_CAP], const char *path) {
+/* Copy a path into a caller-provided buffer.
+ *
+ * The destination's size is taken at the call site, from the array itself.
+ * The previous signature promised TEST_PATH_CAP for every destination, and
+ * several call sites pass a CBM_DAEMON_IPC_WINDOWS_NAME_CAP buffer - half
+ * that - so a path longer than the destination wrote past the end of it.
+ * GCC's -Wstringop-overflow caught that; clang, which upstream's CI uses,
+ * does not, which is why it survived.
+ *
+ * The macro leaves every call site unchanged and bounds the write by the
+ * buffer that is actually there. If a caller ever passes a pointer rather
+ * than an array, sizeof gives the pointer's size, so the copy truncates
+ * instead of overflowing. */
+static void ipc_test_copy_path_n(char *out, size_t out_size, const char *path) {
     if (!path) {
         out[0] = '\0';
         return;
     }
-    (void)snprintf(out, TEST_PATH_CAP, "%s", path);
+    (void)snprintf(out, out_size, "%s", path);
 }
+
+#define ipc_test_copy_path(out, path) ipc_test_copy_path_n((out), sizeof(out), (path))
 
 static bool ipc_test_full_path(char out[TEST_PATH_CAP], const char *path) {
 #ifdef _WIN32

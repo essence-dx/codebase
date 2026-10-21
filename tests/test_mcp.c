@@ -24960,6 +24960,165 @@ TEST(search_code_scan_in_process_limits_and_failures) {
 #undef SCAN_FS
 #undef SCAN_RS
 
+TEST(dx_the_required_fields_match_the_base_tools_own_schemas) {
+    /* The DX surface is the only schema the agent sees, so the DX layer
+     * carries the base tool's own requirements itself. If the two drift, the
+     * DX layer refuses requests the base would accept, or accepts requests
+     * the base will reject with a worse message. The house test is where
+     * this can be checked, because it is the only place both halves are
+     * linked.
+     *
+     * "project" is the deliberate exception: every base tool requires one and
+     * the base has no implicit fallback, but the session knows which project
+     * it is on, so the DX layer fills it in and the agent is not asked. */
+    for (int i = 0; i < DX_REQ_TYPE_COUNT; i++) {
+        dx_request_type_t type = (dx_request_type_t)i;
+        const char *tool = dx_surface_base_tool(type);
+        if (!tool) {
+            continue; /* escape and the governance types reach no base tool */
+        }
+        const char *schema = cbm_mcp_tool_input_schema(tool);
+        ASSERT_NOT_NULL(schema);
+        yyjson_doc *doc = yyjson_read(schema, strlen(schema), 0);
+        ASSERT_NOT_NULL(doc);
+        yyjson_val *root = yyjson_doc_get_root(doc);
+        yyjson_val *required = yyjson_obj_get(root, "required");
+        ASSERT_TRUE(yyjson_is_arr(required));
+
+        const char *dx_fields = dx_surface_type_required_fields(type);
+        ASSERT_NOT_NULL(dx_fields);
+
+        size_t idx;
+        size_t max;
+        yyjson_val *item;
+        yyjson_arr_foreach(required, idx, max, item) {
+            const char *field = yyjson_get_str(item);
+            ASSERT_NOT_NULL(field);
+            bool in_dx_list = false;
+            const char *cursor = dx_fields;
+            while (*cursor) {
+                while (*cursor == ' ') {
+                    cursor++;
+                }
+                const char *end = cursor;
+                while (*end && *end != ' ') {
+                    end++;
+                }
+                if ((size_t)(end - cursor) == strlen(field) &&
+                    strncmp(cursor, field, (size_t)(end - cursor)) == 0) {
+                    in_dx_list = true;
+                    break;
+                }
+                cursor = end;
+            }
+            if (strcmp(field, "project") == 0) {
+                /* The session fills this one in. */
+                ASSERT_FALSE(in_dx_list);
+            } else {
+                ASSERT_TRUE(in_dx_list);
+            }
+        }
+        yyjson_doc_free(doc);
+    }
+    PASS();
+}
+
+TEST(dx_the_schema_names_the_same_required_fields_as_the_layer) {
+    /* The schema is what the agent reads, and the layer is what enforces.
+     * They must say the same thing. */
+    const char *schema = dx_surface_tool_schema();
+    ASSERT_NOT_NULL(schema);
+    yyjson_doc *doc = yyjson_read(schema, strlen(schema), 0);
+    ASSERT_NOT_NULL(doc);
+    yyjson_val *root = yyjson_doc_get_root(doc);
+    yyjson_val *required = yyjson_obj_get(root, "x-dx-required");
+    ASSERT_TRUE(yyjson_is_obj(required));
+
+    for (int i = 0; i < DX_REQ_TYPE_COUNT; i++) {
+        dx_request_type_t type = (dx_request_type_t)i;
+        const char *name = dx_surface_type_name(type);
+        yyjson_val *entry = yyjson_obj_get(required, name);
+        ASSERT_TRUE(yyjson_is_str(entry));
+        const char *layer = dx_surface_type_required_fields(type);
+        if (!layer) {
+            layer = "";
+        }
+        ASSERT_STR_EQ(yyjson_get_str(entry), layer);
+    }
+    yyjson_doc_free(doc);
+    PASS();
+}
+
+TEST(dx_profile_parses_from_the_flag) {
+    /* The DX surface is selected by --tool-profile=dx. Both spellings must
+     * work, and an unknown value must fail closed rather than fall back to
+     * the full menu. */
+    cbm_mcp_tool_profile_t profile = CBM_MCP_TOOL_PROFILE_ALL;
+    const char *args_equals[] = {"server", "--tool-profile=dx"};
+    ASSERT_EQ(cbm_mcp_parse_tool_profile_args(2, args_equals, &profile), 0);
+    ASSERT_EQ((int)profile, (int)CBM_MCP_TOOL_PROFILE_DX);
+
+    const char *args_spaced[] = {"server", "--tool-profile", "dx"};
+    profile = CBM_MCP_TOOL_PROFILE_ALL;
+    ASSERT_EQ(cbm_mcp_parse_tool_profile_args(3, args_spaced, &profile), 0);
+    ASSERT_EQ((int)profile, (int)CBM_MCP_TOOL_PROFILE_DX);
+
+    /* No flag means the full surface, which is upstream's behaviour. */
+    const char *args_none[] = {"server"};
+    profile = CBM_MCP_TOOL_PROFILE_ALL;
+    ASSERT_EQ(cbm_mcp_parse_tool_profile_args(1, args_none, &profile), 0);
+    ASSERT_EQ((int)profile, (int)CBM_MCP_TOOL_PROFILE_ALL);
+
+    /* An unknown profile fails closed: it must not silently widen the
+     * surface to everything. */
+    const char *args_bad[] = {"server", "--tool-profile=nonsense"};
+    profile = CBM_MCP_TOOL_PROFILE_ALL;
+    ASSERT_EQ(cbm_mcp_parse_tool_profile_args(2, args_bad, &profile), -1);
+    PASS();
+}
+
+TEST(dx_profile_does_not_open_the_http_surface) {
+    /* A restricted profile must not start a second unrestricted surface. */
+    ASSERT_FALSE(cbm_mcp_tool_profile_allows_http(CBM_MCP_TOOL_PROFILE_DX));
+    ASSERT_FALSE(cbm_mcp_tool_profile_allows_http(CBM_MCP_TOOL_PROFILE_SCOUT));
+    ASSERT_FALSE(cbm_mcp_tool_profile_allows_http(CBM_MCP_TOOL_PROFILE_ANALYSIS));
+    ASSERT_TRUE(cbm_mcp_tool_profile_allows_http(CBM_MCP_TOOL_PROFILE_ALL));
+    PASS();
+}
+
+TEST(dx_profile_advertises_exactly_one_tool) {
+    /* The whole point of the DX surface is that the agent has one thing to
+     * reach for. If this ever becomes two, the thesis is gone. */
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+    cbm_mcp_server_set_tool_profile(srv, CBM_MCP_TOOL_PROFILE_DX);
+
+    char *resp = cbm_mcp_server_handle(srv, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}");
+    ASSERT_NOT_NULL(resp);
+    yyjson_doc *doc = yyjson_read(resp, strlen(resp), 0);
+    ASSERT_NOT_NULL(doc);
+    yyjson_val *result = yyjson_obj_get(yyjson_doc_get_root(doc), "result");
+    yyjson_val *tools = result ? yyjson_obj_get(result, "tools") : NULL;
+    ASSERT_TRUE(yyjson_is_arr(tools));
+    ASSERT_EQ((long long)yyjson_arr_size(tools), 1);
+
+    yyjson_val *tool = yyjson_arr_get(tools, 0);
+    const char *name = yyjson_get_str(yyjson_obj_get(tool, "name"));
+    ASSERT_STR_EQ(name, "dx_codebase");
+
+    /* And it must be loaded upfront: Claude Code defers every MCP tool
+     * behind ToolSearch, so a deferred dx_codebase is a DX surface the
+     * agent never sees. */
+    yyjson_val *meta = yyjson_obj_get(tool, "_meta");
+    ASSERT_TRUE(yyjson_is_obj(meta));
+    ASSERT_TRUE(yyjson_is_true(yyjson_obj_get(meta, "anthropic/alwaysLoad")));
+
+    yyjson_doc_free(doc);
+    free(resp);
+    cbm_mcp_server_free(srv);
+    PASS();
+}
+
 SUITE(mcp) {
     RUN_TEST(index_repository_async_and_status_refused_without_daemon_issue2144);
     RUN_TEST(index_repository_schema_documents_async_polling_issue2144);
@@ -25400,164 +25559,6 @@ SUITE(mcp) {
     RUN_TEST(dx_the_schema_names_the_same_required_fields_as_the_layer);
 }
 
-TEST(dx_the_required_fields_match_the_base_tools_own_schemas) {
-    /* The DX surface is the only schema the agent sees, so the DX layer
-     * carries the base tool's own requirements itself. If the two drift, the
-     * DX layer refuses requests the base would accept, or accepts requests
-     * the base will reject with a worse message. The house test is where
-     * this can be checked, because it is the only place both halves are
-     * linked.
-     *
-     * "project" is the deliberate exception: every base tool requires one and
-     * the base has no implicit fallback, but the session knows which project
-     * it is on, so the DX layer fills it in and the agent is not asked. */
-    for (int i = 0; i < DX_REQ_TYPE_COUNT; i++) {
-        dx_request_type_t type = (dx_request_type_t)i;
-        const char *tool = dx_surface_base_tool(type);
-        if (!tool) {
-            continue; /* escape and the governance types reach no base tool */
-        }
-        const char *schema = cbm_mcp_tool_input_schema(tool);
-        ASSERT_NOT_NULL(schema);
-        yyjson_doc *doc = yyjson_read(schema, strlen(schema), 0);
-        ASSERT_NOT_NULL(doc);
-        yyjson_val *root = yyjson_doc_get_root(doc);
-        yyjson_val *required = yyjson_obj_get(root, "required");
-        ASSERT_TRUE(yyjson_is_arr(required));
-
-        const char *dx_fields = dx_surface_type_required_fields(type);
-        ASSERT_NOT_NULL(dx_fields);
-
-        size_t idx;
-        size_t max;
-        yyjson_val *item;
-        yyjson_arr_foreach(required, idx, max, item) {
-            const char *field = yyjson_get_str(item);
-            ASSERT_NOT_NULL(field);
-            bool in_dx_list = false;
-            const char *cursor = dx_fields;
-            while (*cursor) {
-                while (*cursor == ' ') {
-                    cursor++;
-                }
-                const char *end = cursor;
-                while (*end && *end != ' ') {
-                    end++;
-                }
-                if ((size_t)(end - cursor) == strlen(field) &&
-                    strncmp(cursor, field, (size_t)(end - cursor)) == 0) {
-                    in_dx_list = true;
-                    break;
-                }
-                cursor = end;
-            }
-            if (strcmp(field, "project") == 0) {
-                /* The session fills this one in. */
-                ASSERT_FALSE(in_dx_list);
-            } else {
-                ASSERT_TRUE(in_dx_list);
-            }
-        }
-        yyjson_doc_free(doc);
-    }
-    PASS();
-}
-
-TEST(dx_the_schema_names_the_same_required_fields_as_the_layer) {
-    /* The schema is what the agent reads, and the layer is what enforces.
-     * They must say the same thing. */
-    const char *schema = dx_surface_tool_schema();
-    ASSERT_NOT_NULL(schema);
-    yyjson_doc *doc = yyjson_read(schema, strlen(schema), 0);
-    ASSERT_NOT_NULL(doc);
-    yyjson_val *root = yyjson_doc_get_root(doc);
-    yyjson_val *required = yyjson_obj_get(root, "x-dx-required");
-    ASSERT_TRUE(yyjson_is_obj(required));
-
-    for (int i = 0; i < DX_REQ_TYPE_COUNT; i++) {
-        dx_request_type_t type = (dx_request_type_t)i;
-        const char *name = dx_surface_type_name(type);
-        yyjson_val *entry = yyjson_obj_get(required, name);
-        ASSERT_TRUE(yyjson_is_str(entry));
-        const char *layer = dx_surface_type_required_fields(type);
-        if (!layer) {
-            layer = "";
-        }
-        ASSERT_STR_EQ(yyjson_get_str(entry), layer);
-    }
-    yyjson_doc_free(doc);
-    PASS();
-}
-
-TEST(dx_profile_parses_from_the_flag) {
-    /* The DX surface is selected by --tool-profile=dx. Both spellings must
-     * work, and an unknown value must fail closed rather than fall back to
-     * the full menu. */
-    cbm_mcp_tool_profile_t profile = CBM_MCP_TOOL_PROFILE_ALL;
-    const char *args_equals[] = {"server", "--tool-profile=dx"};
-    ASSERT_EQ(cbm_mcp_parse_tool_profile_args(2, args_equals, &profile), 0);
-    ASSERT_EQ((int)profile, (int)CBM_MCP_TOOL_PROFILE_DX);
-
-    const char *args_spaced[] = {"server", "--tool-profile", "dx"};
-    profile = CBM_MCP_TOOL_PROFILE_ALL;
-    ASSERT_EQ(cbm_mcp_parse_tool_profile_args(3, args_spaced, &profile), 0);
-    ASSERT_EQ((int)profile, (int)CBM_MCP_TOOL_PROFILE_DX);
-
-    /* No flag means the full surface, which is upstream's behaviour. */
-    const char *args_none[] = {"server"};
-    profile = CBM_MCP_TOOL_PROFILE_ALL;
-    ASSERT_EQ(cbm_mcp_parse_tool_profile_args(1, args_none, &profile), 0);
-    ASSERT_EQ((int)profile, (int)CBM_MCP_TOOL_PROFILE_ALL);
-
-    /* An unknown profile fails closed: it must not silently widen the
-     * surface to everything. */
-    const char *args_bad[] = {"server", "--tool-profile=nonsense"};
-    profile = CBM_MCP_TOOL_PROFILE_ALL;
-    ASSERT_EQ(cbm_mcp_parse_tool_profile_args(2, args_bad, &profile), -1);
-    PASS();
-}
-
-TEST(dx_profile_does_not_open_the_http_surface) {
-    /* A restricted profile must not start a second unrestricted surface. */
-    ASSERT_FALSE(cbm_mcp_tool_profile_allows_http(CBM_MCP_TOOL_PROFILE_DX));
-    ASSERT_FALSE(cbm_mcp_tool_profile_allows_http(CBM_MCP_TOOL_PROFILE_SCOUT));
-    ASSERT_FALSE(cbm_mcp_tool_profile_allows_http(CBM_MCP_TOOL_PROFILE_ANALYSIS));
-    ASSERT_TRUE(cbm_mcp_tool_profile_allows_http(CBM_MCP_TOOL_PROFILE_ALL));
-    PASS();
-}
-
-TEST(dx_profile_advertises_exactly_one_tool) {
-    /* The whole point of the DX surface is that the agent has one thing to
-     * reach for. If this ever becomes two, the thesis is gone. */
-    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
-    ASSERT_NOT_NULL(srv);
-    cbm_mcp_server_set_tool_profile(srv, CBM_MCP_TOOL_PROFILE_DX);
-
-    char *resp = cbm_mcp_server_handle(srv, "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}");
-    ASSERT_NOT_NULL(resp);
-    yyjson_doc *doc = yyjson_read(resp, strlen(resp), 0);
-    ASSERT_NOT_NULL(doc);
-    yyjson_val *result = yyjson_obj_get(yyjson_doc_get_root(doc), "result");
-    yyjson_val *tools = result ? yyjson_obj_get(result, "tools") : NULL;
-    ASSERT_TRUE(yyjson_is_arr(tools));
-    ASSERT_EQ((long long)yyjson_arr_size(tools), 1);
-
-    yyjson_val *tool = yyjson_arr_get(tools, 0);
-    const char *name = yyjson_get_str(yyjson_obj_get(tool, "name"));
-    ASSERT_STR_EQ(name, "dx_codebase");
-
-    /* And it must be loaded upfront: Claude Code defers every MCP tool
-     * behind ToolSearch, so a deferred dx_codebase is a DX surface the
-     * agent never sees. */
-    yyjson_val *meta = yyjson_obj_get(tool, "_meta");
-    ASSERT_TRUE(yyjson_is_obj(meta));
-    ASSERT_TRUE(yyjson_is_true(yyjson_obj_get(meta, "anthropic/alwaysLoad")));
-
-    yyjson_doc_free(doc);
-    free(resp);
-    cbm_mcp_server_free(srv);
-    PASS();
-}
 
 /* Kept separate so daemon-coordination regressions can be iterated without
  * running the much larger MCP behavior suite. */
