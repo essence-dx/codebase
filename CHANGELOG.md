@@ -19,6 +19,46 @@ work, by `DeusData/codebase-memory-mcp`, under MIT. DX's own changes are marked
 
 ## Unreleased
 
+### 2026-10-22 - `merge:` upstream/main `10ab613d` into the DX fork, with zero conflicts
+
+**Upstream moved.** `upstream/main` is at `10ab613d` (2026-10-22 02:54) and the
+fork's point of divergence is `3457b21b`. That is **22 upstream commits** against
+**62 fork commits**, and the merge is **conflict-free** - not "the tool said so",
+but structurally:
+
+```
+upstream: 18 files    fork: 49 files    overlap: 0
+NO FILE IS TOUCHED BY BOTH SIDES -> the merge cannot conflict.
+```
+
+`git merge-tree --write-tree origin/main upstream/main` exits 0 and produces the
+merged tree `c84eeb79`. The real merge, `01c6054b`, has two parents, **0
+unmerged paths**, and a clean working tree.
+
+**What came in:** the external-import guard (`#1355`) - 236 lines in
+`src/pipeline/registry.c` plus `pass_parallel.c`, stopping external package
+imports from binding to project homonyms and keeping workspace-sibling imports
+out of the guard; a Windows CodeQL retrace path fix; a Vite/certifi advisory
+patch; a UI focus-warning fix; and the language-count contract change.
+
+**What did not move:** every one of the fork's own 28 changed files is
+**byte-identical** after the merge - the DX surface, the pure policy modules,
+the foundation fixes, the daemon's profile bound, the release pipeline, the
+specification. The two sides touch disjoint trees, which is why the merge is
+clean and why the fork's work is untouched by construction rather than by luck.
+
+**Executed, on the merged tree:**
+
+| Check | Result |
+| --- | --- |
+| `make -f Makefile.cbm SANITIZE= build/c/test-runner cbm` | **links**, exit 0 - the product binary and the house runner |
+| The three DX contract suites | **114 passed, exit 0** - unchanged by the merge |
+| The `mcp` suite | **380 passed, 13 skipped, 0 failed** - unchanged by the merge |
+
+**Not verified here.** `scripts/smoke-test.sh` and the release pipeline, for the
+reasons `CB-02` names. The full house suite is the open number, and it is
+below.
+
 ### 2026-10-21 - `test:` the full house suite, on the final binary
 
 **194 suites: 8655 passed, 1023 failed, 94 skipped**, on the binary that
