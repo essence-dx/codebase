@@ -434,6 +434,33 @@ different claims.
 
 ### CB-14 - Fix the upstream sync cadence
 
+**Status 2026-10-22 - the gap is now MEASURED, and the cadence is still open.**
+The fork was 22 upstream commits behind `upstream/main` and was synced today.
+
+| What | Result |
+| --- | --- |
+| `upstream/main` `10ab613d` into the fork | **0 conflicts** - and structurally, not by luck: upstream touched 18 files, the fork 49, **the overlap is 0** |
+| `upstream/fix/windows-acl-repair-v2` | **0 conflicts** |
+| `upstream/feat/ci-integrity-gate` | **0 conflicts** |
+| `upstream/dependabot/npm_and_yarn/graph-ui/...` | **0 conflicts** |
+| `upstream/feat/doc-comment-mentions` | **71 conflicts - and `upstream/main` has the identical 71.** The branch is 1135 commits behind upstream's own main, so upstream cannot merge it either. Resolving it here would mean hand-picking 71 files of upstream's unreleased work and reverting 1135 commits of newer work in the same files. That merge is upstream's to make, not the fork's. |
+
+**The fork's own 28 changed files are byte-identical after the merge.** The
+two sides touch disjoint trees, which is why the merge is clean and why the
+fork's work is untouched by construction.
+
+**How the gap is measured, so it can be measured again.** One command per
+branch, no merge performed:
+
+```powershell
+git fetch upstream --prune
+git merge-tree --write-tree --name-only HEAD upstream/main
+```
+
+It exits 0 and prints one line - the merged tree - when the merge is clean,
+and exits 1 with the conflicted paths when it is not. That is the check to
+run on a cadence; it is read-only and it cannot break the branch.
+
 **Evidence.** Upstream landed 74 commits on this repository's `main` in one
 day, 2026-10-20 to 2026-10-21. The local checkout was 74 commits behind until
 it was fast-forwarded on 2026-10-21. Upstream's README was restructured in the
@@ -442,6 +469,9 @@ repository's own `TECH.md`.
 
 **Done when.** A scheduled or documented cadence exists, and `TECH.md` cites
 upstream line numbers against a named commit rather than against "the README".
+The measurement half is done and repeatable; **the cadence half is not** - it
+is a decision about how often this repository should pull, and nothing in this
+repository records that decision yet.
 
 ### CB-15 - Get the hub's release-asset naming decision
 
