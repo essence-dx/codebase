@@ -54,10 +54,21 @@ clean and why the fork's work is untouched by construction rather than by luck.
 | `make -f Makefile.cbm SANITIZE= build/c/test-runner cbm` | **links**, exit 0 - the product binary and the house runner |
 | The three DX contract suites | **114 passed, exit 0** - unchanged by the merge |
 | The `mcp` suite | **380 passed, 13 skipped, 0 failed** - unchanged by the merge |
+| The full house suite | **194 suites: 8665 passed, 1024 failed, 94 skipped** - against **8655 / 1023 / 94** before the merge |
+
+**The merge moved the failure count by exactly one, and it moved it onto
+parity with the base.** The per-test-file diff names a single file: the CLI's
+activation-transaction test, which upstream's own
+`fix/windows-acl-repair-v2` branch touches. Run on **both** trees, the base
+tree and the merged fork fail the **identical 26** CLI assertions - not one
+more, not one fewer. Before the merge the fork failed 25 there, one *better*
+than the base; after it, the fork and the base agree exactly.
+
+That is `CB-22`'s claim, re-verified on the merged tree: **the base and the
+fork fail identically.**
 
 **Not verified here.** `scripts/smoke-test.sh` and the release pipeline, for the
-reasons `CB-02` names. The full house suite is the open number, and it is
-below.
+reasons `CB-02` names.
 
 ### 2026-10-21 - `test:` the full house suite, on the final binary
 

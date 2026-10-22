@@ -778,7 +778,7 @@ own new tests and one memory-map test that depends on the machine's state.
 stack buffer overflow and the invalid free, both of which stop the base from
 compiling at all).
 
-**What the 1023 failures actually are.** They are upstream's own behaviour on
+**What the 1024 failures actually are.** They are upstream's own behaviour on
 a toolchain upstream does not build with: the grammar and LSP probe suites
 fail on cross-file call resolution across the 162 vendored grammars, and
 thirteen suites fail on Windows-platform behaviour - service bootstrap, config
